@@ -151,7 +151,7 @@ class SyncService extends ChangeNotifier {
     } catch (e) {
       _updateStatus(SyncStatus.failed);
       _lastError = e.toString();
-      debugPrint('Erreur synchronisation: $e');
+      debugPrint('Erreur synchronisation');
     } finally {
       _isSyncing = false;
       notifyListeners();
@@ -196,7 +196,7 @@ class SyncService extends ChangeNotifier {
       if (!response.success) {
         // ⚡ Si le token est invalide, on arrête tout et on force la déconnexion
         if (response.statusCode == 401) {
-          debugPrint('🔒 Token expiré : déconnexion');
+          debugPrint('🔒 Session expirée');
           await AuthService.instance.logout();
           return false;
         }
@@ -221,7 +221,7 @@ class SyncService extends ChangeNotifier {
       return true;
     } catch (e) {
       await _syncDao.markAsFailed(id, e.toString());
-      debugPrint('Erreur envoi opération: $e');
+      debugPrint('Erreur envoi opération');
       return false;
     }
   }
@@ -235,7 +235,7 @@ class SyncService extends ChangeNotifier {
       if (decoded is Map<String, dynamic>) return decoded;
       if (decoded is Map) return Map<String, dynamic>.from(decoded);
     } catch (e) {
-      debugPrint('Payload JSON invalide: $payloadString');
+      debugPrint('Payload JSON invalide');
     }
     return {};
   }

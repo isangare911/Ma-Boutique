@@ -61,12 +61,12 @@ class _OtpScreenState extends State<OtpScreen> {
         phoneNumber: widget.phoneNumber,
         timeout: const Duration(seconds: 60),
         verificationCompleted: (PhoneAuthCredential credential) async {
-          // ⚡ Android peut auto-vérifier
           debugPrint('✓ Auto-vérification Firebase');
           await _signInWithCredential(credential);
         },
         verificationFailed: (FirebaseAuthException e) {
-          debugPrint('❌ Erreur Firebase: ${e.message}');
+          // ⚡ Ne pas logger e.message (peut contenir des infos)
+          debugPrint('❌ Erreur Firebase auth');
           if (mounted) {
             setState(() {
               _isSending = false;
@@ -75,7 +75,8 @@ class _OtpScreenState extends State<OtpScreen> {
           }
         },
         codeSent: (String verificationId, int? resendToken) {
-          debugPrint('✓ OTP envoyé, verificationId: $verificationId');
+          // ⚡ Ne pas logger verificationId
+          debugPrint('✓ OTP envoyé');
           if (mounted) {
             setState(() {
               _verificationId = verificationId;
@@ -89,11 +90,12 @@ class _OtpScreenState extends State<OtpScreen> {
         },
       );
     } catch (e) {
-      debugPrint('❌ Exception: $e');
+      // ⚡ Logger l'exception générique sans le contenu
+      debugPrint('❌ Exception envoi OTP');
       if (mounted) {
         setState(() {
           _isSending = false;
-          _errorMessage = 'Erreur: $e';
+          _errorMessage = 'Erreur d\'envoi du code';
         });
       }
     }
@@ -143,7 +145,7 @@ class _OtpScreenState extends State<OtpScreen> {
 
       await _signInWithCredential(credential);
     } catch (e) {
-      debugPrint('❌ Erreur vérification: $e');
+      debugPrint('❌ Erreur vérification OTP');
       if (mounted) {
         setState(() {
           _isVerifying = false;
@@ -155,20 +157,16 @@ class _OtpScreenState extends State<OtpScreen> {
 
   Future<void> _signInWithCredential(PhoneAuthCredential credential) async {
     try {
-      // ⚡ Se connecter avec Firebase
       final userCredential =
           await FirebaseAuth.instance.signInWithCredential(credential);
 
-      debugPrint('✓ Firebase user: ${userCredential.user?.uid}');
+      debugPrint('✓ Firebase auth OK');
 
-      // ⚡ Marquer l'appareil comme vérifié
       await AuthService.instance.markDeviceAsVerified(widget.phoneNumber);
 
-      // ⚡ Charger l'abonnement
       await SubscriptionService.instance.refreshSubscription();
 
       if (mounted) {
-        // ✅ Aller au Dashboard
         Navigator.of(context).pushAndRemoveUntil(
           MaterialPageRoute(
             builder: (_) => const MainNavigationScreen(),
@@ -177,7 +175,7 @@ class _OtpScreenState extends State<OtpScreen> {
         );
       }
     } catch (e) {
-      debugPrint('❌ Erreur signInWithCredential: $e');
+      debugPrint('❌ Erreur signInWithCredential');
       if (mounted) {
         setState(() {
           _isVerifying = false;
@@ -210,7 +208,6 @@ class _OtpScreenState extends State<OtpScreen> {
   Future<void> _resendOTP() async {
     if (!_canResend) return;
 
-    // Vider les champs
     for (var c in _controllers) {
       c.clear();
     }
@@ -276,8 +273,6 @@ class _OtpScreenState extends State<OtpScreen> {
                 ),
               ),
               const SizedBox(height: 32),
-
-              // Message d'erreur
               if (_errorMessage != null)
                 Container(
                   padding: const EdgeInsets.all(12),
@@ -306,8 +301,6 @@ class _OtpScreenState extends State<OtpScreen> {
                     ],
                   ),
                 ),
-
-              // Loader d'envoi
               if (_isSending)
                 Center(
                   child: Padding(
@@ -329,7 +322,6 @@ class _OtpScreenState extends State<OtpScreen> {
                   ),
                 )
               else
-                // Champs OTP
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                   children: List.generate(
@@ -372,6 +364,16 @@ class _OtpScreenState extends State<OtpScreen> {
                           inputFormatters: [
                             FilteringTextInputFormatter.digitsOnly,
                           ],
+                          // ⚡ AJOUT : validator simple pour OTP
+                          validator: (value) {
+                            if (value == null || value.isEmpty) {
+                              return '';
+                            }
+                            if (!RegExp(r'^\d$').hasMatch(value)) {
+                              return '';
+                            }
+                            return null;
+                          },
                           onChanged: (value) => _onChanged(value, index),
                         ),
                       ),
@@ -379,8 +381,6 @@ class _OtpScreenState extends State<OtpScreen> {
                   ),
                 ),
               const SizedBox(height: 32),
-
-              // Timer de renvoi
               if (!_isSending)
                 Center(
                   child: Column(
@@ -407,8 +407,6 @@ class _OtpScreenState extends State<OtpScreen> {
                   ),
                 ),
               const Spacer(),
-
-              // Bouton Vérifier
               if (!_isSending)
                 ElevatedButton(
                   onPressed: _isVerifying ? null : _verifyOTP,

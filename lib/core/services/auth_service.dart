@@ -1,4 +1,5 @@
 import 'package:flutter/foundation.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../network/api_client.dart';
@@ -9,9 +10,21 @@ class AuthService extends ChangeNotifier {
 
   final ApiClient _apiClient = ApiClient.instance;
 
-  // ⚡ Clés SharedPreferences
+  // ⚡ Stockage sécurisé pour les tokens
+  static const _secureStorage = FlutterSecureStorage(
+    aOptions: AndroidOptions(
+      encryptedSharedPreferences: true,
+    ),
+    iOptions: IOSOptions(
+      accessibility: KeychainAccessibility.first_unlock,
+    ),
+  );
+
+  // ⚡ Clés sécurisées (tokens)
   static const String _keyAccessToken = 'access_token';
   static const String _keyRefreshToken = 'refresh_token';
+
+  // ⚡ Clés non sensibles (restent dans SharedPreferences)
   static const String _keyDeviceVerified = 'device_verified';
   static const String _keyVerifiedPhone = 'verified_phone';
 
@@ -30,11 +43,10 @@ class AuthService extends ChangeNotifier {
   // INITIALISATION
   // ═══════════════════════════════════════════════════════════
 
-  /// Charge les tokens sauvegardés au démarrage
   Future<void> initialize() async {
-    final prefs = await SharedPreferences.getInstance();
-    _accessToken = prefs.getString(_keyAccessToken);
-    _refreshToken = prefs.getString(_keyRefreshToken);
+    // ⚡ Lire les tokens depuis le stockage sécurisé
+    _accessToken = await _secureStorage.read(key: _keyAccessToken);
+    _refreshToken = await _secureStorage.read(key: _keyRefreshToken);
     _isAuthenticated = _accessToken != null;
 
     if (_isAuthenticated) {
@@ -47,7 +59,6 @@ class AuthService extends ChangeNotifier {
   // CONNEXION
   // ═══════════════════════════════════════════════════════════
 
-  /// Connexion via API
   Future<bool> login({
     required String phone,
     required String password,
@@ -56,7 +67,6 @@ class AuthService extends ChangeNotifier {
     notifyListeners();
 
     try {
-      // ⚡ Retirer tout ancien token avant le login
       _apiClient.clearAuthToken();
 
       final response = await _apiClient.post('/auth/login/', {
@@ -73,7 +83,7 @@ class AuthService extends ChangeNotifier {
       debugPrint('Login échoué: ${response.error ?? "Identifiants invalides"}');
       return false;
     } catch (e) {
-      debugPrint('Erreur login: $e');
+      debugPrint('Erreur login');
       return false;
     } finally {
       _isLoading = false;
@@ -85,7 +95,6 @@ class AuthService extends ChangeNotifier {
   // INSCRIPTION
   // ═══════════════════════════════════════════════════════════
 
-  /// Inscription via API
   Future<bool> register({
     required String phone,
     required String password,
@@ -113,10 +122,10 @@ class AuthService extends ChangeNotifier {
         return true;
       }
 
-      debugPrint('Register échoué: ${response.error}');
+      debugPrint('Register échoué');
       return false;
     } catch (e) {
-      debugPrint('Erreur register: $e');
+      debugPrint('Erreur register');
       return false;
     } finally {
       _isLoading = false;
@@ -128,7 +137,6 @@ class AuthService extends ChangeNotifier {
   // SESSION
   // ═══════════════════════════════════════════════════════════
 
-  /// Sauvegarde la session (tokens + user)
   Future<void> _saveSession(Map<String, dynamic> data) async {
     final tokens = data['tokens'] as Map<String, dynamic>;
     _accessToken = tokens['access'] as String;
@@ -136,18 +144,15 @@ class AuthService extends ChangeNotifier {
     _user = data['user'] as Map<String, dynamic>?;
     _isAuthenticated = true;
 
-    // Configurer le client API
     _apiClient.setAuthToken(_accessToken!);
 
-    // Sauvegarder localement
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_keyAccessToken, _accessToken!);
-    await prefs.setString(_keyRefreshToken, _refreshToken!);
+    // ⚡ Écrire les tokens dans le stockage sécurisé
+    await _secureStorage.write(key: _keyAccessToken, value: _accessToken);
+    await _secureStorage.write(key: _keyRefreshToken, value: _refreshToken);
 
     notifyListeners();
   }
 
-  /// Déconnexion
   Future<void> logout() async {
     _accessToken = null;
     _refreshToken = null;
@@ -155,49 +160,42 @@ class AuthService extends ChangeNotifier {
     _isAuthenticated = false;
     _apiClient.clearAuthToken();
 
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.remove(_keyAccessToken);
-    await prefs.remove(_keyRefreshToken);
-    // ⚡ Note : on NE supprime PAS _keyDeviceVerified
-    // pour que l'utilisateur n'ait pas à refaire l'OTP à la reconnexion
+    // ⚡ Effacer les tokens du stockage sécurisé
+    await _secureStorage.delete(key: _keyAccessToken);
+    await _secureStorage.delete(key: _keyRefreshToken);
+
+    // ⚡ NE PAS toucher à _keyDeviceVerified (SharedPreferences)
+    // pour ne pas refaire l'OTP à la reconnexion
 
     notifyListeners();
   }
 
-  /// Déconnexion totale (avec effacement de la vérification)
-  /// Utilisé uniquement en cas de manipulation de date
   Future<void> forceLogout() async {
     await logout();
     await resetDeviceVerification();
   }
 
   // ═══════════════════════════════════════════════════════════
-  // ⚡ VÉRIFICATION D'APPAREIL (DEVICE VERIFICATION)
+  // VÉRIFICATION D'APPAREIL (SharedPreferences — non sensible)
   // ═══════════════════════════════════════════════════════════
 
-  /// Vérifie si cet appareil a déjà validé l'OTP pour ce numéro.
-  /// Si oui, l'utilisateur n'a PAS besoin de refaire l'OTP à la connexion.
   Future<bool> isDeviceVerified(String phone) async {
     final prefs = await SharedPreferences.getInstance();
     final verified = prefs.getBool(_keyDeviceVerified) ?? false;
     final savedPhone = prefs.getString(_keyVerifiedPhone);
 
     final result = verified && savedPhone == phone;
-    debugPrint('Device vérifié pour $phone ? $result');
+    debugPrint('Device vérifié pour ce numéro ? $result');
     return result;
   }
 
-  /// Marque cet appareil comme vérifié pour ce numéro
-  /// (appelé après que l'utilisateur a validé l'OTP)
   Future<void> markDeviceAsVerified(String phone) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_keyDeviceVerified, true);
     await prefs.setString(_keyVerifiedPhone, phone);
-    debugPrint('✓ Appareil marqué comme vérifié pour $phone');
+    debugPrint('✓ Appareil marqué comme vérifié');
   }
 
-  /// Réinitialise la vérification d'appareil
-  /// (utilisé en cas de manipulation de date ou de problème de sécurité)
   Future<void> resetDeviceVerification() async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove(_keyDeviceVerified);
@@ -205,13 +203,11 @@ class AuthService extends ChangeNotifier {
     debugPrint('✓ Vérification d\'appareil réinitialisée');
   }
 
-  /// Retourne le numéro de téléphone vérifié (ou null si aucun)
   Future<String?> getVerifiedPhone() async {
     final prefs = await SharedPreferences.getInstance();
     return prefs.getString(_keyVerifiedPhone);
   }
 
-  /// Vérifie si un numéro est stocké comme vérifié
   Future<bool> hasVerifiedPhone() async {
     final prefs = await SharedPreferences.getInstance();
     return prefs.getString(_keyVerifiedPhone) != null &&

@@ -363,6 +363,7 @@ class _NewCreditScreenState extends State<NewCreditScreen> {
                     TextFormField(
                       controller: _notesController,
                       maxLines: 3,
+                      maxLength: 300,
                       style: TextStyle(color: AppColors.text(context)),
                       decoration: InputDecoration(
                         hintText: 'Ex: Riz 25kg + Huile 1L',
@@ -379,6 +380,18 @@ class _NewCreditScreenState extends State<NewCreditScreen> {
                               BorderSide(color: AppColors.border(context)),
                         ),
                       ),
+                      // ⚡ AJOUT : validator pour éviter les abus
+                      validator: (value) {
+                        if (value != null && value.length > 300) {
+                          return 'Maximum 300 caractères';
+                        }
+                        // ⚡ Interdire les caractères de contrôle
+                        if (value != null &&
+                            RegExp(r'[\x00-\x1F\x7F]').hasMatch(value)) {
+                          return 'Caractères invalides détectés';
+                        }
+                        return null;
+                      },
                     ),
                     const SizedBox(height: 32),
                     ElevatedButton.icon(

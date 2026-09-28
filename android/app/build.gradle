@@ -34,6 +34,12 @@ android {
 
     buildTypes {
         release {
+            // ⚡ Active R8/ProGuard pour obfusquer le code
+        minifyEnabled true
+        shrinkResources true
+        proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+        
+        // ⚡ Signature (à configurer pour la Play Store)
             signingConfig = signingConfigs.debug
         }
     }

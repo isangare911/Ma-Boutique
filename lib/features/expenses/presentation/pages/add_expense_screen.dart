@@ -233,6 +233,7 @@ class _AddExpenseScreenState extends State<AddExpenseScreen> {
               TextFormField(
                 controller: _descriptionController,
                 maxLines: 3,
+                maxLength: 200,
                 style: TextStyle(color: AppColors.text(context)),
                 decoration: InputDecoration(
                   hintText: 'Ex: Carburant pour la moto',
@@ -247,6 +248,18 @@ class _AddExpenseScreenState extends State<AddExpenseScreen> {
                     borderSide: BorderSide(color: AppColors.border(context)),
                   ),
                 ),
+                // ⚡ AJOUT : validator pour éviter les abus
+                validator: (value) {
+                  if (value != null && value.length > 200) {
+                    return 'Maximum 200 caractères';
+                  }
+                  // ⚡ Interdire les caractères de contrôle
+                  if (value != null &&
+                      RegExp(r'[\x00-\x1F\x7F]').hasMatch(value)) {
+                    return 'Caractères invalides détectés';
+                  }
+                  return null;
+                },
               ),
               const SizedBox(height: 32),
               ElevatedButton.icon(
