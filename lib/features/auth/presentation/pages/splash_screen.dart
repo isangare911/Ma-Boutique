@@ -3,8 +3,12 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../../../../core/constants/app_assets.dart';
+import '../../../../core/services/auth_service.dart';
 import '../../../../core/services/shop_settings_service.dart';
+import '../../../../core/services/subscription_service.dart';
 import '../../../../core/theme/app_theme.dart';
+import '../../../navigation/presentation/pages/main_navigation_screen.dart';
+import 'login_screen.dart';
 import 'onboarding_screen.dart';
 
 class SplashScreen extends StatefulWidget {
@@ -23,9 +27,36 @@ class _SplashScreenState extends State<SplashScreen> {
 
   Future<void> _init() async {
     await ShopSettingsService.instance.initialize();
-    await Future.delayed(const Duration(seconds: 3));
+    await Future.delayed(const Duration(seconds: 2));
 
-    if (mounted) {
+    if (!mounted) return;
+
+    // 1️⃣ Utilisateur déjà connecté → Dashboard direct
+    if (AuthService.instance.isAuthenticated) {
+      await SubscriptionService.instance.refreshSubscription();
+
+      if (!mounted) return;
+
+      Navigator.of(context).pushReplacement(
+        MaterialPageRoute(
+          builder: (_) => const MainNavigationScreen(),
+        ),
+      );
+      return;
+    }
+
+    // 2️⃣ Onboarding déjà vu → Login direct
+    final hasSeenOnboarding = await OnboardingScreen.hasBeenSeen();
+
+    if (!mounted) return;
+
+    if (hasSeenOnboarding) {
+      Navigator.of(context).pushReplacement(
+        MaterialPageRoute(builder: (_) => const LoginScreen()),
+      );
+    } else {
+      // 3️⃣ Première fois → Onboarding
+
       Navigator.of(context).pushReplacement(
         MaterialPageRoute(builder: (_) => const OnboardingScreen()),
       );
@@ -39,27 +70,17 @@ class _SplashScreenState extends State<SplashScreen> {
       body: Stack(
         fit: StackFit.expand,
         children: [
-          // ═══════════════════════════════════════════════════
-          // COUCHE 1 : IMAGE DE FOND (splash_background.png)
-          // ═══════════════════════════════════════════════════
           Image.asset(
             AppAssets.splashBackground,
-            fit: BoxFit.cover, // ⚡ Remplit tout l'écran
+            fit: BoxFit.cover,
             errorBuilder: (_, __, ___) => Container(
               color: Colors.white,
             ),
           ),
-
-          // ═══════════════════════════════════════════════════
-          // COUCHE 2 : CONTENU (logo + texte + loader)
-          // ═══════════════════════════════════════════════════
           SafeArea(
             child: Column(
               children: [
-                // Espace flexible en haut
                 const Spacer(flex: 2),
-
-                // ⚡ LOGO CENTRÉ
                 Image.asset(
                   AppAssets.logo,
                   width: 180,
@@ -67,10 +88,7 @@ class _SplashScreenState extends State<SplashScreen> {
                   fit: BoxFit.contain,
                   errorBuilder: (_, __, ___) => _buildDefaultLogo(),
                 ),
-
                 const SizedBox(height: 24),
-
-                // Nom fixe "MA BOUTIQUE"
                 const Text(
                   'MA BOUTIQUE',
                   textAlign: TextAlign.center,
@@ -90,11 +108,7 @@ class _SplashScreenState extends State<SplashScreen> {
                     fontSize: 14,
                   ),
                 ),
-
-                // Espace flexible
                 const Spacer(flex: 2),
-
-                // Loader en bas
                 const CircularProgressIndicator(
                   color: AppColors.primary,
                   strokeWidth: 3,

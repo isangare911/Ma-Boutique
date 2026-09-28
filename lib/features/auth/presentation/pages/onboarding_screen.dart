@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../../../core/constants/app_assets.dart';
 import '../../../../core/theme/app_theme.dart';
@@ -6,6 +7,21 @@ import 'login_screen.dart';
 
 class OnboardingScreen extends StatefulWidget {
   const OnboardingScreen({super.key});
+
+  // ⚡ Clé pour savoir si l'onboarding a déjà été vu
+  static const String _keyHasSeenOnboarding = 'has_seen_onboarding';
+
+  /// Vérifie si l'utilisateur a déjà vu l'onboarding
+  static Future<bool> hasBeenSeen() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getBool(_keyHasSeenOnboarding) ?? false;
+  }
+
+  /// Marque l'onboarding comme vu
+  static Future<void> markAsSeen() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_keyHasSeenOnboarding, true);
+  }
 
   @override
   State<OnboardingScreen> createState() => _OnboardingScreenState();
@@ -56,7 +72,12 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     }
   }
 
-  void _goToLogin() {
+  Future<void> _goToLogin() async {
+    // ⚡ Marquer l'onboarding comme vu avant de naviguer
+    await OnboardingScreen.markAsSeen();
+
+    if (!mounted) return;
+
     Navigator.pushReplacement(
       context,
       MaterialPageRoute(builder: (_) => const LoginScreen()),
@@ -70,7 +91,6 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
       body: SafeArea(
         child: Column(
           children: [
-            // Bouton Passer
             Align(
               alignment: Alignment.centerRight,
               child: TextButton(
@@ -81,8 +101,6 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                 ),
               ),
             ),
-
-            // Pages
             Expanded(
               child: PageView.builder(
                 controller: _pageController,
@@ -95,8 +113,6 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                 },
               ),
             ),
-
-            // Indicateurs
             Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: List.generate(
@@ -116,8 +132,6 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
               ),
             ),
             const SizedBox(height: 32),
-
-            // Bouton Suivant / Commencer
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 24.0),
               child: ElevatedButton(
@@ -140,7 +154,6 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          // Image personnalisée (avec fallback icône)
           Container(
             width: 220,
             height: 220,

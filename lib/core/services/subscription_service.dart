@@ -49,22 +49,41 @@ class SubscriptionService extends ChangeNotifier {
     try {
       final prefs = await SharedPreferences.getInstance();
       final cachedJson = prefs.getString(_keyCache);
-      if (cachedJson != null) {
-        final data = jsonDecode(cachedJson) as Map<String, dynamic>;
+
+      if (cachedJson == null) {
+        debugPrint('ℹ Aucun cache abonnement');
+        return;
+      }
+
+      // ⚡ Essayer de décoder, avec gestion d'erreur locale
+      try {
+        final decoded = jsonDecode(cachedJson);
+        if (decoded is! Map) {
+          throw const FormatException('Cache abonnement: format invalide');
+        }
+
+        final data = Map<String, dynamic>.from(decoded);
         _subscription = Subscription.fromJson(data);
         debugPrint('✓ Abonnement chargé du cache: ${_subscription!.status}');
         notifyListeners();
+      } catch (e) {
+        // ⚡ Cache corrompu → on le supprime pour repartir propre
+        debugPrint('⚠ Cache abonnement corrompu, suppression...');
+        await prefs.remove(_keyCache);
+        await prefs.remove(_keyLastCheck);
+        await prefs.remove(_keyDeviceTime);
+        _subscription = null;
+        notifyListeners();
       }
     } catch (e) {
-      debugPrint('Erreur chargement cache abonnement: $e');
+      debugPrint('Erreur chargement cache abonnement');
     }
   }
 
   // ═══════════════════════════════════════════════════════════
-  // ⚡ MOBILE MONEY — PAIEMENT D'ABONNEMENT
+  // MOBILE MONEY — PAIEMENT D'ABONNEMENT
   // ═══════════════════════════════════════════════════════════
 
-  /// Crée un paiement et retourne les instructions USSD
   Future<Map<String, dynamic>?> createPayment({
     required String plan,
     required String method,
@@ -92,13 +111,11 @@ class SubscriptionService extends ChangeNotifier {
       debugPrint('Erreur createPayment: ${response.error}');
       return null;
     } catch (e) {
-      debugPrint('Exception createPayment: $e');
+      debugPrint('Exception createPayment');
       return null;
     }
   }
 
-  /// ⚡ NOUVEAU : Soumet la preuve de paiement (code de transaction)
-  /// Le paiement passe en PENDING_REVIEW, en attente de validation admin
   Future<bool> submitPaymentProof({
     required String paymentId,
     required String transactionId,
@@ -117,13 +134,11 @@ class SubscriptionService extends ChangeNotifier {
       debugPrint('Erreur submitPaymentProof: ${response.error}');
       return false;
     } catch (e) {
-      debugPrint('Exception submitPaymentProof: $e');
+      debugPrint('Exception submitPaymentProof');
       return false;
     }
   }
 
-  /// ⚡ ANCIEN : Confirme un paiement et active l'abonnement immédiatement
-  /// (gardé pour compatibilité, mais obsolète)
   Future<Map<String, dynamic>?> confirmPayment({
     required String paymentId,
     required String transactionId,
@@ -156,12 +171,11 @@ class SubscriptionService extends ChangeNotifier {
       debugPrint('Erreur confirmPayment: ${response.error}');
       return null;
     } catch (e) {
-      debugPrint('Exception confirmPayment: $e');
+      debugPrint('Exception confirmPayment');
       return null;
     }
   }
 
-  /// Annule un paiement en attente
   Future<bool> cancelPayment(String paymentId) async {
     try {
       final response = await _apiClient.post(
@@ -170,12 +184,11 @@ class SubscriptionService extends ChangeNotifier {
       );
       return response.success;
     } catch (e) {
-      debugPrint('Exception cancelPayment: $e');
+      debugPrint('Exception cancelPayment');
       return false;
     }
   }
 
-  /// Historique des paiements
   Future<List<Payment>> getPaymentHistory() async {
     try {
       final response = await _apiClient.get('/payments/');
@@ -187,7 +200,7 @@ class SubscriptionService extends ChangeNotifier {
       }
       return [];
     } catch (e) {
-      debugPrint('Exception getPaymentHistory: $e');
+      debugPrint('Exception getPaymentHistory');
       return [];
     }
   }
@@ -231,7 +244,7 @@ class SubscriptionService extends ChangeNotifier {
   }
 
   // ═══════════════════════════════════════════════════════════
-  // ⚡ ANTI-MANIPULATION DE DATE
+  // ANTI-MANIPULATION DE DATE
   // ═══════════════════════════════════════════════════════════
 
   Future<bool> isDateManipulated() async {
@@ -269,7 +282,7 @@ class SubscriptionService extends ChangeNotifier {
 
       return false;
     } catch (e) {
-      debugPrint('Erreur isDateManipulated: $e');
+      debugPrint('Erreur isDateManipulated');
       return false;
     }
   }
@@ -334,7 +347,7 @@ class SubscriptionService extends ChangeNotifier {
       }
       return [];
     } catch (e) {
-      debugPrint('Erreur chargement plans: $e');
+      debugPrint('Erreur chargement plans');
       return [];
     }
   }
@@ -360,7 +373,7 @@ class SubscriptionService extends ChangeNotifier {
       }
       return false;
     } catch (e) {
-      debugPrint('Erreur activation: $e');
+      debugPrint('Erreur activation');
       return false;
     }
   }
