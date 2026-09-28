@@ -1,6 +1,6 @@
 class Payment {
   final String id;
-  final String paymentCode; // ⚡ NOUVEAU
+  final String paymentCode;
   final String plan;
   final String planName;
   final double amount;
@@ -11,9 +11,9 @@ class Payment {
   final String? payerPhone;
   final int durationDays;
   final DateTime createdAt;
-  final DateTime? approvedAt; // ⚡ Renommé (était paidAt)
-  final String? rejectionReason; // ⚡ NOUVEAU
-  final int? approvedBy; // ⚡ NOUVEAU
+  final DateTime? approvedAt;
+  final String? rejectionReason;
+  final int? approvedBy;
 
   Payment({
     required this.id,
@@ -37,28 +37,14 @@ class Payment {
   // ÉTATS DU PAIEMENT
   // ═══════════════════════════════════════════════════════════
 
-  /// En attente de paiement (client n'a pas encore payé)
   bool get isPending => status == 'PENDING';
-
-  /// Client a soumis la preuve, en attente de validation admin
   bool get isPendingReview => status == 'PENDING_REVIEW';
-
-  /// Approuvé par l'admin
   bool get isApproved => status == 'APPROVED';
-
-  /// Rejeté par l'admin
   bool get isRejected => status == 'REJECTED';
-
-  /// Annulé par le client
   bool get isCancelled => status == 'CANCELLED';
-
-  /// Ancien statut (compatibilité)
   bool get isSuccess => status == 'SUCCESS';
 
-  /// Le paiement est-il finalisé ?
   bool get isFinalized => isApproved || isRejected || isCancelled;
-
-  /// Le paiement est-il en cours de traitement ?
   bool get isInProgress => isPending || isPendingReview;
 
   factory Payment.fromJson(Map<String, dynamic> json) {
@@ -85,7 +71,6 @@ class Payment {
     );
   }
 
-  // ⚡ Parse un montant (String ou num)
   static double _parseAmount(dynamic value) {
     if (value == null) return 0.0;
     if (value is num) return value.toDouble();
@@ -93,13 +78,33 @@ class Payment {
     return 0.0;
   }
 
-  /// Libellé lisible du statut
+  /// Libellé long du statut
   String get statusLabel {
     switch (status) {
       case 'PENDING':
         return 'En attente de paiement';
       case 'PENDING_REVIEW':
         return 'En cours de validation';
+      case 'APPROVED':
+        return 'Approuvé';
+      case 'REJECTED':
+        return 'Rejeté';
+      case 'CANCELLED':
+        return 'Annulé';
+      case 'SUCCESS':
+        return 'Payé';
+      default:
+        return status;
+    }
+  }
+
+  /// ⚡ Libellé court du statut (pour badges)
+  String get statusName {
+    switch (status) {
+      case 'PENDING':
+        return 'En attente';
+      case 'PENDING_REVIEW':
+        return 'À valider';
       case 'APPROVED':
         return 'Approuvé';
       case 'REJECTED':
@@ -156,7 +161,6 @@ class PaymentInstructions {
     );
   }
 
-  // ⚡ Parse un entier (String ou num)
   static int _parseInt(dynamic value) {
     if (value == null) return 0;
     if (value is int) return value;

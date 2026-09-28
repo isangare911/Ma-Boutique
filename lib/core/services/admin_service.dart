@@ -70,9 +70,27 @@ class AdminService {
     }
   }
 
-  /// Paiements en attente de validation
   Future<List<Payment>> getPendingPayments() async {
     return getPayments(status: 'PENDING_REVIEW');
+  }
+
+  // ═══════════════════════════════════════════════════════════
+  // ⚡ NOUVEAU : Paiements d'une boutique spécifique
+  // ═══════════════════════════════════════════════════════════
+  Future<List<Payment>> getShopPayments(String shopId) async {
+    try {
+      final response = await _apiClient.get('/admin/shops/$shopId/payments/');
+
+      if (response.success && response.body is List) {
+        return (response.body as List)
+            .map((json) => Payment.fromJson(json as Map<String, dynamic>))
+            .toList();
+      }
+      return [];
+    } catch (e) {
+      debugPrint('Exception getShopPayments: $e');
+      return [];
+    }
   }
 
   // ═══════════════════════════════════════════════════════════

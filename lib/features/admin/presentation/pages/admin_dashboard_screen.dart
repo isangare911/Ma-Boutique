@@ -1,11 +1,11 @@
-import 'package:boutique/features/admin/presentation/pages/admin_payments_screen.dart';
-import 'package:boutique/features/admin/presentation/pages/admin_shops_screen.dart';
 import 'package:flutter/material.dart';
 
 import '../../../../core/services/admin_service.dart';
 import '../../../../core/theme/app_theme.dart';
 import '../../../../core/utils/formatters.dart';
 import '../../../../data/models/admin_models.dart';
+import 'admin_payments_screen.dart';
+import 'admin_shops_screen.dart';
 
 class AdminDashboardScreen extends StatefulWidget {
   const AdminDashboardScreen({super.key});
@@ -16,27 +16,36 @@ class AdminDashboardScreen extends StatefulWidget {
 
 class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
   AdminStats? _stats;
+  List<AdminShop> _shops = [];
   bool _isLoading = true;
   String? _error;
 
   @override
   void initState() {
     super.initState();
-    _loadStats();
+    _loadAll();
   }
 
-  Future<void> _loadStats() async {
+  /// ⚡ Charge stats + boutiques en parallèle
+  Future<void> _loadAll() async {
     setState(() {
       _isLoading = true;
       _error = null;
     });
 
-    final stats = await AdminService.instance.getStats();
+    final results = await Future.wait([
+      AdminService.instance.getStats(),
+      AdminService.instance.getShops(),
+    ]);
 
     if (!mounted) return;
 
+    final stats = results[0] as AdminStats?;
+    final shops = results[1] as List<AdminShop>;
+
     setState(() {
       _stats = stats;
+      _shops = shops;
       _isLoading = false;
       if (stats == null) {
         _error = 'Erreur de chargement des statistiques';
@@ -53,7 +62,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
         actions: [
           IconButton(
             icon: const Icon(Icons.refresh),
-            onPressed: _loadStats,
+            onPressed: _loadAll,
           ),
           IconButton(
             icon: const Icon(Icons.exit_to_app),
@@ -90,14 +99,11 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
             Text(
               _error!,
               textAlign: TextAlign.center,
-              style: TextStyle(
-                fontSize: 15,
-                color: AppColors.text(context),
-              ),
+              style: TextStyle(fontSize: 15, color: AppColors.text(context)),
             ),
             const SizedBox(height: 24),
             ElevatedButton.icon(
-              onPressed: _loadStats,
+              onPressed: _loadAll,
               icon: const Icon(Icons.refresh),
               label: const Text('Réessayer'),
             ),
@@ -110,8 +116,23 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
   Widget _buildDashboard() {
     if (_stats == null) return const SizedBox.shrink();
 
+    // ⚡ Calculs des alertes
+    final expiringSoon = _shops
+        .where((s) =>
+            s.status != 'EXPIRED' &&
+            s.daysRemaining > 0 &&
+            s.daysRemaining <= 7)
+        .toList()
+      ..sort((a, b) => a.daysRemaining.compareTo(b.daysRemaining));
+
+    final longExpired = _shops.where((s) => s.status == 'EXPIRED').toList();
+
+    final hasAlerts = expiringSoon.isNotEmpty ||
+        longExpired.isNotEmpty ||
+        _stats!.pendingReview > 0;
+
     return RefreshIndicator(
-      onRefresh: _loadStats,
+      onRefresh: _loadAll,
       color: AppColors.green(context),
       child: SingleChildScrollView(
         physics: const AlwaysScrollableScrollPhysics(),
@@ -120,15 +141,21 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             // ═══════════════════════════════════════════════════
+            // 🔔 ALERTES
+            // ═══════════════════════════════════════════════════
+            if (hasAlerts) ...[
+              _buildAlertsSection(expiringSoon, longExpired),
+              const SizedBox(height: 24),
+            ],
+
+            // ═══════════════════════════════════════════════════
             // CARTE PRINCIPALE (MRR)
             // ═══════════════════════════════════════════════════
             _buildMainRevenueCard(),
 
             const SizedBox(height: 24),
 
-            // ═══════════════════════════════════════════════════
-            // ACTIONS RAPIDES
-            // ═══════════════════════════════════════════════════
+            // Actions rapides
             Text(
               'Actions rapides',
               style: TextStyle(
@@ -142,9 +169,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
 
             const SizedBox(height: 24),
 
-            // ═══════════════════════════════════════════════════
-            // STATS BOUTIQUES
-            // ═══════════════════════════════════════════════════
+            // Stats boutiques
             Text(
               'Boutiques',
               style: TextStyle(
@@ -158,9 +183,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
 
             const SizedBox(height: 24),
 
-            // ═══════════════════════════════════════════════════
-            // REVENUS PAR PLAN
-            // ═══════════════════════════════════════════════════
+            // Revenus par plan
             if (_stats!.revenueByPlan.isNotEmpty) ...[
               Text(
                 'Revenus par plan',
@@ -175,9 +198,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
               const SizedBox(height: 24),
             ],
 
-            // ═══════════════════════════════════════════════════
-            // REVENUS PAR MÉTHODE
-            // ═══════════════════════════════════════════════════
+            // Revenus par méthode
             if (_stats!.revenueByMethod.isNotEmpty) ...[
               Text(
                 'Revenus par méthode',
@@ -192,9 +213,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
               const SizedBox(height: 24),
             ],
 
-            // ═══════════════════════════════════════════════════
-            // DÉTAILS REVENUS
-            // ═══════════════════════════════════════════════════
+            // Détails
             Text(
               'Détails des revenus',
               style: TextStyle(
@@ -208,6 +227,169 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
 
             const SizedBox(height: 32),
           ],
+        ),
+      ),
+    );
+  }
+
+  // ═══════════════════════════════════════════════════════════
+  // 🔔 SECTION ALERTES
+  // ═══════════════════════════════════════════════════════════
+  Widget _buildAlertsSection(
+    List<AdminShop> expiringSoon,
+    List<AdminShop> longExpired,
+  ) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Icon(
+              Icons.notifications_active,
+              color: AppColors.warningTheme(context),
+              size: 20,
+            ),
+            const SizedBox(width: 8),
+            Text(
+              'Alertes',
+              style: TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.bold,
+                color: AppColors.text(context),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 12),
+
+        // Paiements en attente
+        if (_stats!.pendingReview > 0)
+          _buildAlertTile(
+            icon: Icons.pending_actions,
+            color: AppColors.warningTheme(context),
+            title:
+                '${_stats!.pendingReview} paiement${_stats!.pendingReview > 1 ? "s" : ""} en attente',
+            subtitle: 'À valider dans l\'onglet paiements',
+            onTap: () async {
+              await Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => const AdminPaymentsScreen(),
+                ),
+              );
+              _loadAll();
+            },
+          ),
+
+        // Boutiques expirant bientôt
+        if (expiringSoon.isNotEmpty)
+          _buildAlertTile(
+            icon: Icons.schedule,
+            color: AppColors.dangerTheme(context),
+            title:
+                '${expiringSoon.length} boutique${expiringSoon.length > 1 ? "s" : ""} expire dans 7 jours',
+            subtitle: expiringSoon.length == 1
+                ? '${expiringSoon.first.name} — J-${expiringSoon.first.daysRemaining}'
+                : 'La plus urgente : ${expiringSoon.first.name} (J-${expiringSoon.first.daysRemaining})',
+            onTap: () async {
+              await Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => const AdminShopsScreen(
+                    initialTab: 0,
+                    initialSort: 'days_asc',
+                  ),
+                ),
+              );
+              _loadAll();
+            },
+          ),
+
+        // Boutiques expirées
+        if (longExpired.isNotEmpty)
+          _buildAlertTile(
+            icon: Icons.cancel,
+            color: AppColors.textSec(context),
+            title:
+                '${longExpired.length} boutique${longExpired.length > 1 ? "s" : ""} expirée${longExpired.length > 1 ? "s" : ""}',
+            subtitle: 'À relancer ou désactiver',
+            onTap: () async {
+              await Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => const AdminShopsScreen(initialTab: 4),
+                ),
+              );
+              _loadAll();
+            },
+          ),
+      ],
+    );
+  }
+
+  Widget _buildAlertTile({
+    required IconData icon,
+    required Color color,
+    required String title,
+    required String subtitle,
+    required VoidCallback onTap,
+  }) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      child: Material(
+        color: color.withOpacity(0.08),
+        borderRadius: BorderRadius.circular(12),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(12),
+          onTap: onTap,
+          child: Container(
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: color.withOpacity(0.3)),
+            ),
+            child: Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: color.withOpacity(0.15),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Icon(icon, color: color, size: 18),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        title,
+                        style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                          color: AppColors.text(context),
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        subtitle,
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: AppColors.textSec(context),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                Icon(
+                  Icons.chevron_right,
+                  color: color,
+                  size: 20,
+                ),
+              ],
+            ),
+          ),
         ),
       ),
     );
@@ -347,14 +529,11 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
             count: _stats!.totalShops,
             color: Colors.blue,
             onTap: () async {
-              // TODO: Naviguer vers liste boutiques
               await Navigator.push(
                 context,
-                MaterialPageRoute(
-                  builder: (_) => const AdminShopsScreen(),
-                ),
+                MaterialPageRoute(builder: (_) => const AdminShopsScreen()),
               );
-              _loadStats();
+              _loadAll();
             },
           ),
         ),
@@ -368,14 +547,13 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                 ? AppColors.warningTheme(context)
                 : AppColors.textSec(context),
             onTap: () async {
-              // TODO: Naviguer vers paiements en attente
               await Navigator.push(
                 context,
                 MaterialPageRoute(
                   builder: (_) => const AdminPaymentsScreen(),
                 ),
               );
-              _loadStats();
+              _loadAll();
             },
             highlight: _stats!.pendingReview > 0,
           ),
@@ -427,7 +605,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                       color: color,
                       borderRadius: BorderRadius.circular(10),
                     ),
-                    child: Text(
+                    child: const Text(
                       'NEW',
                       style: TextStyle(
                         color: Colors.white,
@@ -814,10 +992,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
       children: [
         Text(
           label,
-          style: TextStyle(
-            fontSize: 13,
-            color: AppColors.textSec(context),
-          ),
+          style: TextStyle(fontSize: 13, color: AppColors.textSec(context)),
         ),
         Text(
           value,
