@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../../../../core/permissions/permission_guard.dart';
+import '../../../../core/permissions/permissions.dart';
 import '../../../../core/theme/app_theme.dart';
 import '../../../../core/utils/formatters.dart';
 import '../../../../data/models/product.dart';
@@ -22,8 +24,11 @@ class StockProductTile extends StatelessWidget {
     final isLowStock =
         product.quantity > 0 && product.quantity <= product.alertThreshold;
 
+    // 🔒 Le tap n'est actif que si l'utilisateur peut modifier le stock
+    final canEdit = Permissions.can(Permission.editStock);
+
     return GestureDetector(
-      onTap: onTap,
+      onTap: canEdit ? onTap : null,
       child: Container(
         margin: const EdgeInsets.only(bottom: 12),
         padding: const EdgeInsets.all(12),
@@ -76,12 +81,15 @@ class StockProductTile extends StatelessWidget {
               ),
             ),
 
-            // Bouton Ajouter
-            IconButton(
-              onPressed: onAddStock,
-              icon: const Icon(Icons.add_circle_outline, size: 28),
-              color: AppColors.green(context),
-              tooltip: 'Ajouter au stock',
+            // 🔒 Bouton "Ajouter au stock" — uniquement si editStock
+            PermissionGuard(
+              permission: Permission.editStock,
+              child: IconButton(
+                onPressed: onAddStock,
+                icon: const Icon(Icons.add_circle_outline, size: 28),
+                color: AppColors.green(context),
+                tooltip: 'Ajouter au stock',
+              ),
             ),
           ],
         ),

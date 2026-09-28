@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../../../../core/permissions/permission_guard.dart';
+import '../../../../core/permissions/permissions.dart';
 import '../../../../core/services/data_refresh_notifier.dart';
 import '../../../../core/theme/app_theme.dart';
 import '../../../../data/models/product.dart';
@@ -161,6 +163,9 @@ class _StockListScreenState extends State<StockListScreen>
   }
 
   Future<void> _openProductForm({Product? product}) async {
+    // 🔒 Sécurité : ne rien faire si pas la permission
+    if (!Permissions.can(Permission.editStock)) return;
+
     final result = await Navigator.push(
       context,
       MaterialPageRoute(
@@ -214,6 +219,34 @@ class _StockListScreenState extends State<StockListScreen>
       ),
       body: Column(
         children: [
+          // 🔒 Bandeau "lecture seule" si pas editStock
+          if (!Permissions.can(Permission.editStock))
+            Container(
+              width: double.infinity,
+              margin: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.orange.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: Colors.orange.withOpacity(0.3)),
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.visibility, color: Colors.orange, size: 20),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'Consultation seule — vous ne pouvez pas modifier le stock.',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: Colors.orange.shade800,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+
           Padding(
             padding: const EdgeInsets.all(16.0),
             child: TextField(
@@ -264,14 +297,19 @@ class _StockListScreenState extends State<StockListScreen>
           ),
         ],
       ),
-      floatingActionButton: FloatingActionButton.extended(
-        heroTag: 'stock_fab',
-        onPressed: () => _openProductForm(),
-        backgroundColor: AppColors.green(context),
-        icon: const Icon(Icons.add, color: Colors.white),
-        label: const Text(
-          'Ajouter un produit',
-          style: TextStyle(color: Colors.white),
+
+      // 🔒 FAB visible uniquement si editStock
+      floatingActionButton: PermissionGuard(
+        permission: Permission.editStock,
+        child: FloatingActionButton.extended(
+          heroTag: 'stock_fab',
+          onPressed: () => _openProductForm(),
+          backgroundColor: AppColors.green(context),
+          icon: const Icon(Icons.add, color: Colors.white),
+          label: const Text(
+            'Ajouter un produit',
+            style: TextStyle(color: Colors.white),
+          ),
         ),
       ),
     );
@@ -298,7 +336,9 @@ class _StockListScreenState extends State<StockListScreen>
           ),
           const SizedBox(height: 8),
           Text(
-            'Appuyez sur + pour ajouter un produit',
+            Permissions.can(Permission.editStock)
+                ? 'Appuyez sur + pour ajouter un produit'
+                : 'Demandez au gérant d\'ajouter des produits',
             style: TextStyle(
               fontSize: 13,
               color: AppColors.textSec(context),

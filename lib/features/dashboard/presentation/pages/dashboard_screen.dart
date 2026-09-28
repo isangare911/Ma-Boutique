@@ -1,9 +1,9 @@
 import 'dart:io';
 
-import 'package:boutique/features/dashboard/presentation/pages/widgets/alert_item.dart';
-import 'package:boutique/features/dashboard/presentation/pages/widgets/quick_action_button.dart';
 import 'package:flutter/material.dart';
 
+import '../../../../core/permissions/permission_guard.dart';
+import '../../../../core/permissions/permissions.dart';
 import '../../../../core/services/data_refresh_notifier.dart';
 import '../../../../core/services/shop_settings_service.dart';
 import '../../../../core/theme/app_theme.dart';
@@ -16,6 +16,8 @@ import '../../../navigation/presentation/pages/main_navigation_screen.dart';
 import '../../../reports/presentation/pages/reports_screen.dart';
 import '../../../sales/presentation/pages/new_sale_screen.dart';
 import '../../../settings/presentation/pages/shop_settings_screen.dart';
+import 'widgets/alert_item.dart';
+import 'widgets/quick_action_button.dart';
 
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key});
@@ -81,6 +83,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
     }
   }
 
+  /// ⚡ Va à un onglet de la navigation principale, seulement s'il est visible
+  /// pour ce rôle. Sinon, on tombe sur l'onglet "Plus" (le dernier).
   void _goToTab(int index) {
     MainNavigationScreen.tabNotifier.value = index;
   }
@@ -90,12 +94,14 @@ class _DashboardScreenState extends State<DashboardScreen> {
     final hasLogo = logoPath != null && logoPath.isNotEmpty;
 
     return GestureDetector(
-      onTap: () {
-        Navigator.push(
-          context,
-          MaterialPageRoute(builder: (_) => const ShopSettingsScreen()),
-        );
-      },
+      onTap: Permissions.can(Permission.viewSettings)
+          ? () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const ShopSettingsScreen()),
+              );
+            }
+          : null,
       child: Container(
         width: 45,
         height: 45,
@@ -183,7 +189,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 ),
                 const SizedBox(height: 24),
 
-                // CARTE PRINCIPALE (CA)
+                // CARTE PRINCIPALE (CA) — visible pour tous, mais adaptée
                 Container(
                   width: double.infinity,
                   padding: const EdgeInsets.all(20),
@@ -226,10 +232,17 @@ class _DashboardScreenState extends State<DashboardScreen> {
                             '$_todaySalesCount',
                           ),
                           const SizedBox(width: 24),
-                          _buildMiniStat(
-                            context,
-                            'Bénéfice',
-                            AppFormatters.formatCurrency(_todayProfit),
+                          // 🔒 Le bénéfice est sensible : visible si editSales ou viewReports
+                          PermissionGuardAny(
+                            permissions: [
+                              Permission.editSales,
+                              Permission.viewReports,
+                            ],
+                            child: _buildMiniStat(
+                              context,
+                              'Bénéfice',
+                              AppFormatters.formatCurrency(_todayProfit),
+                            ),
                           ),
                         ],
                       ),
@@ -251,49 +264,67 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    QuickActionButton(
-                      label: 'Nouvelle\nvente',
-                      icon: Icons.add_shopping_cart,
-                      onTap: () async {
-                        // ⚡ Vérifier l'abonnement AVANT d'autoriser
-                        final canProceed =
-                            await SubscriptionGuard.canPerformAction(
-                          context,
-                          actionName: 'Nouvelle vente',
-                        );
-                        if (!canProceed) return;
+                    // 🔒 Nouvelle vente : editSales
+                    PermissionGuard(
+                      permission: Permission.editSales,
+                      child: QuickActionButton(
+                        label: 'Nouvelle\nvente',
+                        icon: Icons.add_shopping_cart,
+                        onTap: () async {
+                          final canProceed =
+                              await SubscriptionGuard.canPerformAction(
+                            context,
+                            actionName: 'Nouvelle vente',
+                          );
+                          if (!canProceed) return;
 
-                        await Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (_) => const NewSaleScreen(),
-                          ),
-                        );
-                        DataRefreshNotifier.instance.notifySalesChanged();
-                        await _loadStats();
-                      },
+                          await Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => const NewSaleScreen(),
+                            ),
+                          );
+                          DataRefreshNotifier.instance.notifySalesChanged();
+                          await _loadStats();
+                        },
+                      ),
                     ),
-                    QuickActionButton(
-                      label: 'Stock',
-                      icon: Icons.inventory_2_outlined,
-                      onTap: () => _goToTab(2),
+
+                    // 🔒 Stock : viewStock
+                    PermissionGuard(
+                      permission: Permission.viewStock,
+                      child: QuickActionButton(
+                        label: 'Stock',
+                        icon: Icons.inventory_2_outlined,
+                        onTap: () => _goToTab(2),
+                      ),
                     ),
-                    QuickActionButton(
-                      label: 'Crédit',
-                      icon: Icons.credit_card,
-                      onTap: () => _goToTab(3),
+
+                    // 🔒 Crédit : viewCredits
+                    PermissionGuard(
+                      permission: Permission.viewCredits,
+                      child: QuickActionButton(
+                        label: 'Crédit',
+                        icon: Icons.credit_card,
+                        onTap: () => _goToTab(3),
+                      ),
                     ),
-                    QuickActionButton(
-                      label: 'Rapports',
-                      icon: Icons.bar_chart,
-                      onTap: () {
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (_) => const ReportsScreen(),
-                          ),
-                        );
-                      },
+
+                    // 🔒 Rapports : viewReports
+                    PermissionGuard(
+                      permission: Permission.viewReports,
+                      child: QuickActionButton(
+                        label: 'Rapports',
+                        icon: Icons.bar_chart,
+                        onTap: () {
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => const ReportsScreen(),
+                            ),
+                          );
+                        },
+                      ),
                     ),
                   ],
                 ),
@@ -311,11 +342,15 @@ class _DashboardScreenState extends State<DashboardScreen> {
                         color: AppColors.text(context),
                       ),
                     ),
-                    TextButton(
-                      onPressed: () => _goToTab(2),
-                      child: Text(
-                        'Voir tout',
-                        style: TextStyle(color: AppColors.green(context)),
+                    // 🔒 "Voir tout" pointe vers Stock → masqué si pas viewStock
+                    PermissionGuard(
+                      permission: Permission.viewStock,
+                      child: TextButton(
+                        onPressed: () => _goToTab(2),
+                        child: Text(
+                          'Voir tout',
+                          style: TextStyle(color: AppColors.green(context)),
+                        ),
                       ),
                     ),
                   ],
@@ -332,19 +367,28 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     ),
                   )
                 else ...[
-                  if (_outOfStockCount > 0)
-                    AlertItem(
-                      title:
-                          '$_outOfStockCount produit${_outOfStockCount > 1 ? "s" : ""} en rupture de stock',
-                      subtitle: 'Appuyez pour voir les détails',
-                      icon: Icons.warning_amber_rounded,
-                      color: AppColors.dangerTheme(context),
+                  // 🔒 Ruptures : pertinent seulement si viewStock
+                  PermissionGuard(
+                    permission: Permission.viewStock,
+                    child: _outOfStockCount > 0
+                        ? AlertItem(
+                            title:
+                                '$_outOfStockCount produit${_outOfStockCount > 1 ? "s" : ""} en rupture de stock',
+                            subtitle: 'Appuyez pour voir les détails',
+                            icon: Icons.warning_amber_rounded,
+                            color: AppColors.dangerTheme(context),
+                          )
+                        : const SizedBox.shrink(),
+                  ),
+                  // 🔒 Total produits : viewStock
+                  PermissionGuard(
+                    permission: Permission.viewStock,
+                    child: AlertItem(
+                      title: '$_totalProducts produits au total',
+                      subtitle: 'Gérez votre inventaire',
+                      icon: Icons.inventory_2_outlined,
+                      color: AppColors.green(context),
                     ),
-                  AlertItem(
-                    title: '$_totalProducts produits au total',
-                    subtitle: 'Gérez votre inventaire',
-                    icon: Icons.inventory_2_outlined,
-                    color: AppColors.green(context),
                   ),
                 ],
                 const SizedBox(height: 24),

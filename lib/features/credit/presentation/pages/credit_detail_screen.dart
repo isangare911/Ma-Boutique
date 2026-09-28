@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../../../../core/permissions/permission_guard.dart';
+import '../../../../core/permissions/permissions.dart';
 import '../../../../core/services/data_refresh_notifier.dart';
 import '../../../../core/services/shop_settings_service.dart';
 import '../../../../core/services/whatsapp_service.dart';
@@ -70,6 +72,19 @@ class _CreditDetailScreenState extends State<CreditDetailScreen> {
   // ENREGISTRER UN REMBOURSEMENT
   // ═══════════════════════════════════════════════════════════
   Future<void> _registerPayment() async {
+    // 🔒 Sécurité : vérifier la permission
+    if (!Permissions.can(Permission.collectCreditPayment)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: const Text(
+            'Vous n\'avez pas la permission d\'encaisser un paiement',
+          ),
+          backgroundColor: AppColors.dangerTheme(context),
+        ),
+      );
+      return;
+    }
+
     final controller = TextEditingController();
     String paymentMethod = 'Espèces';
 
@@ -489,12 +504,51 @@ class _CreditDetailScreenState extends State<CreditDetailScreen> {
                   // BOUTONS D'ACTION
                   // ═══════════════════════════════════════════════
                   if (!_credit.isPaid) ...[
-                    ElevatedButton.icon(
-                      onPressed: _registerPayment,
-                      icon: const Icon(Icons.payments_outlined),
-                      label: const Text('Enregistrer un paiement'),
+                    // 🔒 Bouton d'encaissement : seulement si collectCreditPayment
+                    PermissionGuard(
+                      permission: Permission.collectCreditPayment,
+                      child: ElevatedButton.icon(
+                        onPressed: _registerPayment,
+                        icon: const Icon(Icons.payments_outlined),
+                        label: const Text('Enregistrer un paiement'),
+                      ),
                     ),
+
+                    // 🔒 Message info si le comptable n'a qu'un accès lecture (au cas où)
+                    PermissionGuard(
+                      permission: Permission.viewCredits,
+                      fallback: const SizedBox.shrink(),
+                      child: !Permissions.can(Permission.collectCreditPayment)
+                          ? Container(
+                              margin: const EdgeInsets.only(top: 8),
+                              padding: const EdgeInsets.all(10),
+                              decoration: BoxDecoration(
+                                color: Colors.blue.withOpacity(0.1),
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              child: Row(
+                                children: [
+                                  const Icon(Icons.info_outline,
+                                      color: Colors.blue, size: 16),
+                                  const SizedBox(width: 8),
+                                  Expanded(
+                                    child: Text(
+                                      'Consultation seule — contactez le gérant pour encaisser.',
+                                      style: TextStyle(
+                                        fontSize: 12,
+                                        color: Colors.blue.shade800,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            )
+                          : const SizedBox.shrink(),
+                    ),
+
                     const SizedBox(height: 12),
+
+                    // Rappel WhatsApp : accessible à tous ceux qui voient les crédits
                     OutlinedButton.icon(
                       onPressed: _remindByWhatsApp,
                       icon: const Icon(Icons.chat, color: Color(0xFF25D366)),

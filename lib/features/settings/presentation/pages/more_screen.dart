@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../../../../core/permissions/permission_guard.dart';
+import '../../../../core/permissions/permissions.dart';
 import '../../../../core/services/auth_service.dart';
 import '../../../../core/services/subscription_service.dart';
 import '../../../../core/theme/app_theme.dart';
@@ -17,32 +19,6 @@ import '../../../users/presentation/pages/users_list_screen.dart';
 class MoreScreen extends StatelessWidget {
   const MoreScreen({super.key});
 
-  // ═══════════════════════════════════════════════════════════
-  // VÉRIFIER SI L'UTILISATEUR EST SUPERUSER
-  // ═══════════════════════════════════════════════════════════
-  bool _isSuperuser() {
-    final user = AuthService.instance.user;
-    if (user == null) return false;
-    return user['is_superuser'] == true;
-  }
-
-  // ═══════════════════════════════════════════════════════════
-  // VÉRIFIER SI L'UTILISATEUR PEUT GÉRER LES UTILISATEURS
-  // ═══════════════════════════════════════════════════════════
-  bool _canManageUsers() {
-    final user = AuthService.instance.user;
-    if (user == null) return false;
-
-    final role = user['role'] as String?;
-    final isSuperuser = user['is_superuser'] == true;
-
-    // OWNER, MANAGER ou superuser peuvent gérer les utilisateurs
-    return isSuperuser || role == 'OWNER' || role == 'MANAGER';
-  }
-
-  // ═══════════════════════════════════════════════════════════
-  // DÉCONNEXION
-  // ═══════════════════════════════════════════════════════════
   Future<void> _handleLogout(BuildContext context) async {
     final confirmed = await showDialog<bool>(
       context: context,
@@ -84,9 +60,6 @@ class MoreScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final isSuperuser = _isSuperuser();
-    final canManageUsers = _canManageUsers();
-
     return Scaffold(
       backgroundColor: AppColors.bg(context),
       appBar: AppBar(
@@ -97,34 +70,39 @@ class MoreScreen extends StatelessWidget {
         padding: const EdgeInsets.all(16),
         children: [
           // ═══════════════════════════════════════════════════
-          // SECTION ADMIN (visible uniquement pour le superuser)
+          // SECTION ADMIN (superuser uniquement)
           // ═══════════════════════════════════════════════════
-          if (isSuperuser) ...[
-            _buildMenuItem(
-              context,
-              icon: Icons.admin_panel_settings,
-              title: 'Dashboard Admin',
-              subtitle: 'Gérer les abonnés et paiements',
-              color: Colors.deepPurple,
-              onTap: () {
-                Navigator.push(
+          PermissionGuard(
+            permission: Permission.viewAdminDashboard,
+            child: Column(
+              children: [
+                _buildMenuItem(
                   context,
-                  MaterialPageRoute(
-                    builder: (_) => const AdminDashboardScreen(),
-                  ),
-                );
-              },
+                  icon: Icons.admin_panel_settings,
+                  title: 'Dashboard Admin',
+                  subtitle: 'Gérer les abonnés et paiements',
+                  color: Colors.deepPurple,
+                  onTap: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => const AdminDashboardScreen(),
+                      ),
+                    );
+                  },
+                ),
+                Divider(color: AppColors.border(context)),
+              ],
             ),
-            Divider(color: AppColors.border(context)),
-          ],
+          ),
 
           // ═══════════════════════════════════════════════════
-          // MENU PRINCIPAL
+          // MENU PRINCIPAL (chaque item conditionné)
           // ═══════════════════════════════════════════════════
 
-          // ⚡ Utilisateurs (visible pour OWNER/MANAGER)
-          if (canManageUsers)
-            _buildMenuItem(
+          PermissionGuard(
+            permission: Permission.viewUsers,
+            child: _buildMenuItem(
               context,
               icon: Icons.group_outlined,
               title: 'Utilisateurs',
@@ -133,123 +111,154 @@ class MoreScreen extends StatelessWidget {
               onTap: () {
                 Navigator.push(
                   context,
-                  MaterialPageRoute(
-                    builder: (_) => const UsersListScreen(),
-                  ),
+                  MaterialPageRoute(builder: (_) => const UsersListScreen()),
                 );
               },
             ),
+          ),
 
-          _buildMenuItem(
-            context,
-            icon: Icons.people_outline,
-            title: 'Clients',
-            subtitle: 'Gérer vos clients',
-            color: Colors.blue,
-            onTap: () {
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('Clients — Bientôt disponible')),
-              );
-            },
+          PermissionGuard(
+            permission: Permission.viewCustomers,
+            child: _buildMenuItem(
+              context,
+              icon: Icons.people_outline,
+              title: 'Clients',
+              subtitle: 'Gérer vos clients',
+              color: Colors.blue,
+              onTap: () {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Clients — Bientôt disponible')),
+                );
+              },
+            ),
           ),
-          _buildMenuItem(
-            context,
-            icon: Icons.local_shipping_outlined,
-            title: 'Fournisseurs',
-            subtitle: 'Gérer vos fournisseurs',
-            color: Colors.orange,
-            onTap: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(builder: (_) => const SuppliersListScreen()),
-              );
-            },
+
+          PermissionGuard(
+            permission: Permission.viewSuppliers,
+            child: _buildMenuItem(
+              context,
+              icon: Icons.local_shipping_outlined,
+              title: 'Fournisseurs',
+              subtitle: 'Gérer vos fournisseurs',
+              color: Colors.orange,
+              onTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                      builder: (_) => const SuppliersListScreen()),
+                );
+              },
+            ),
           ),
-          _buildMenuItem(
-            context,
-            icon: Icons.point_of_sale_outlined,
-            title: 'Caisse',
-            subtitle: 'Ouvrir et fermer la caisse',
-            color: Colors.green,
-            onTap: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(builder: (_) => const CashScreen()),
-              );
-            },
+
+          PermissionGuard(
+            permission: Permission.viewCash,
+            child: _buildMenuItem(
+              context,
+              icon: Icons.point_of_sale_outlined,
+              title: 'Caisse',
+              subtitle: 'Ouvrir et fermer la caisse',
+              color: Colors.green,
+              onTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => const CashScreen()),
+                );
+              },
+            ),
           ),
-          _buildMenuItem(
-            context,
-            icon: Icons.bar_chart,
-            title: 'Rapports',
-            subtitle: 'Voir vos statistiques',
-            color: Colors.purple,
-            onTap: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(builder: (_) => const ReportsScreen()),
-              );
-            },
+
+          PermissionGuard(
+            permission: Permission.viewReports,
+            child: _buildMenuItem(
+              context,
+              icon: Icons.bar_chart,
+              title: 'Rapports',
+              subtitle: 'Voir vos statistiques',
+              color: Colors.purple,
+              onTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => const ReportsScreen()),
+                );
+              },
+            ),
           ),
-          _buildMenuItem(
-            context,
-            icon: Icons.money_off,
-            title: 'Dépenses',
-            subtitle: 'Enregistrer vos dépenses',
-            color: Colors.red,
-            onTap: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(builder: (_) => const ExpensesListScreen()),
-              );
-            },
+
+          PermissionGuard(
+            permission: Permission.viewExpenses,
+            child: _buildMenuItem(
+              context,
+              icon: Icons.money_off,
+              title: 'Dépenses',
+              subtitle: 'Enregistrer vos dépenses',
+              color: Colors.red,
+              onTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => const ExpensesListScreen()),
+                );
+              },
+            ),
           ),
 
           Divider(color: AppColors.border(context)),
 
-          _buildMenuItem(
-            context,
-            icon: Icons.sync,
-            title: 'Synchronisation',
-            subtitle: 'Gérer la sync avec le Cloud',
-            color: AppColors.green(context),
-            onTap: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(builder: (_) => const SyncStatusScreen()),
-              );
-            },
+          PermissionGuard(
+            permission: Permission.viewSync,
+            child: _buildMenuItem(
+              context,
+              icon: Icons.sync,
+              title: 'Synchronisation',
+              subtitle: 'Gérer la sync avec le Cloud',
+              color: AppColors.green(context),
+              onTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => const SyncStatusScreen()),
+                );
+              },
+            ),
           ),
-          _buildMenuItem(
-            context,
-            icon: Icons.settings_outlined,
-            title: 'Paramètres',
-            subtitle: 'Configurer votre boutique',
-            color: AppColors.textSec(context),
-            onTap: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(builder: (_) => const ShopSettingsScreen()),
-              );
-            },
+
+          PermissionGuard(
+            permission: Permission.viewSettings,
+            child: _buildMenuItem(
+              context,
+              icon: Icons.settings_outlined,
+              title: 'Paramètres',
+              subtitle: 'Configurer votre boutique',
+              color: AppColors.textSec(context),
+              onTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => const ShopSettingsScreen()),
+                );
+              },
+            ),
           ),
-          _buildMenuItem(
-            context,
-            icon: Icons.workspace_premium_outlined,
-            title: 'Abonnement',
-            subtitle: SubscriptionService.instance.isTrial
-                ? '${SubscriptionService.instance.daysRemaining} jours d\'essai restants'
-                : SubscriptionService.instance.statusName,
-            color: AppColors.green(context),
-            onTap: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (_) => const SubscriptionScreen(),
-                ),
-              );
-            },
+
+          PermissionGuard(
+            permission: Permission.viewSubscription,
+            child: _buildMenuItem(
+              context,
+              icon: Icons.workspace_premium_outlined,
+              title: 'Abonnement',
+              subtitle: SubscriptionService.instance.isTrial
+                  ? '${SubscriptionService.instance.daysRemaining} jours d\'essai restants'
+                  : SubscriptionService.instance.statusName,
+              color: AppColors.green(context),
+              onTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => const SubscriptionScreen(),
+                  ),
+                );
+              },
+            ),
           ),
+
           _buildMenuItem(
             context,
             icon: Icons.support_agent,
@@ -266,7 +275,7 @@ class MoreScreen extends StatelessWidget {
           const SizedBox(height: 16),
 
           // ═══════════════════════════════════════════════════
-          // BOUTON DÉCONNEXION
+          // DÉCONNEXION
           // ═══════════════════════════════════════════════════
           Card(
             elevation: 0,

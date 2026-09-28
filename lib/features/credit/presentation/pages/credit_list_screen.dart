@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../../../../core/permissions/permission_guard.dart';
+import '../../../../core/permissions/permissions.dart';
 import '../../../../core/services/data_refresh_notifier.dart';
 import '../../../../core/theme/app_theme.dart';
 import '../../../../core/utils/formatters.dart';
@@ -92,6 +94,25 @@ class _CreditListScreenState extends State<CreditListScreen>
     });
   }
 
+  Future<void> _openNewCredit() async {
+    // 🔒 Sécurité : seul editCredits peut créer un crédit
+    if (!Permissions.can(Permission.editCredits)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Vous n\'avez pas la permission de créer un crédit'),
+        ),
+      );
+      return;
+    }
+
+    await Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => const NewCreditScreen()),
+    );
+    DataRefreshNotifier.instance.notifyCreditsChanged();
+    await _loadData();
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -133,6 +154,35 @@ class _CreditListScreenState extends State<CreditListScreen>
       ),
       body: Column(
         children: [
+          // 🔒 Bandeau info pour le comptable (lecture seule pour la création)
+          if (!Permissions.can(Permission.editCredits) &&
+              Permissions.can(Permission.viewCredits))
+            Container(
+              width: double.infinity,
+              margin: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.blue.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: Colors.blue.withOpacity(0.3)),
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.info_outline, color: Colors.blue, size: 20),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'Vous pouvez consulter les crédits et encaisser les paiements.',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: Colors.blue.shade800,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+
           _buildSummaryCard(context),
           Expanded(
             child: _isLoading
@@ -172,22 +222,20 @@ class _CreditListScreenState extends State<CreditListScreen>
           ),
         ],
       ),
-      floatingActionButton: FloatingActionButton.extended(
-        heroTag: 'credit_fab',
-        onPressed: () async {
-          await Navigator.push(
-            context,
-            MaterialPageRoute(builder: (_) => const NewCreditScreen()),
-          );
-          DataRefreshNotifier.instance.notifyCreditsChanged();
-          await _loadData();
-        },
-        backgroundColor: AppColors.green(context),
-        foregroundColor: AppColors.onGreen(context),
-        icon: Icon(Icons.add, color: AppColors.onGreen(context)),
-        label: Text(
-          'Nouveau crédit',
-          style: TextStyle(color: AppColors.onGreen(context)),
+
+      // 🔒 FAB "Nouveau crédit" uniquement si editCredits
+      floatingActionButton: PermissionGuard(
+        permission: Permission.editCredits,
+        child: FloatingActionButton.extended(
+          heroTag: 'credit_fab',
+          onPressed: _openNewCredit,
+          backgroundColor: AppColors.green(context),
+          foregroundColor: AppColors.onGreen(context),
+          icon: Icon(Icons.add, color: AppColors.onGreen(context)),
+          label: Text(
+            'Nouveau crédit',
+            style: TextStyle(color: AppColors.onGreen(context)),
+          ),
         ),
       ),
     );
@@ -296,7 +344,9 @@ class _CreditListScreenState extends State<CreditListScreen>
           ),
           const SizedBox(height: 8),
           Text(
-            'Appuyez sur + pour créer un crédit',
+            Permissions.can(Permission.editCredits)
+                ? 'Appuyez sur + pour créer un crédit'
+                : 'Aucun crédit à afficher',
             style: TextStyle(
               fontSize: 13,
               color: AppColors.textSec(context),
