@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../../../../core/services/shop_user_service.dart';
 import '../../../../core/theme/app_theme.dart';
@@ -55,14 +56,128 @@ class _AddUserScreenState extends State<AddUserScreen> {
     if (!mounted) return;
 
     if (result['success'] == true) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            '✓ ${_firstNameController.text.trim()} ajouté comme ${ShopUserRole.getLabel(_selectedRole)}',
+      final generatedPassword = result['generated_password'] as String?;
+
+      if (generatedPassword != null) {
+        // ⚡ Afficher le mot de passe généré dans un dialog
+        await showDialog(
+          context: context,
+          barrierDismissible: false,
+          builder: (context) => AlertDialog(
+            title: Row(
+              children: [
+                Icon(
+                  Icons.check_circle,
+                  color: AppColors.successTheme(context),
+                ),
+                const SizedBox(width: 8),
+                const Text('Utilisateur créé'),
+              ],
+            ),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  '${_firstNameController.text.trim()} a été ajouté comme ${ShopUserRole.getLabel(_selectedRole)}.',
+                ),
+                const SizedBox(height: 16),
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: AppColors.warningTheme(context).withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(
+                      color: AppColors.warningTheme(context).withOpacity(0.3),
+                    ),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        '⚠️ Mot de passe temporaire',
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.bold,
+                          color: AppColors.warningTheme(context),
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        'Ce mot de passe ne sera plus jamais affiché. '
+                        'Transmettez-le maintenant à l\'employé.',
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: AppColors.text(context),
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 8,
+                        ),
+                        decoration: BoxDecoration(
+                          color: AppColors.card(context),
+                          borderRadius: BorderRadius.circular(6),
+                          border: Border.all(color: AppColors.border(context)),
+                        ),
+                        child: Row(
+                          children: [
+                            Expanded(
+                              child: SelectableText(
+                                generatedPassword,
+                                style: TextStyle(
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.bold,
+                                  fontFamily: 'monospace',
+                                  color: AppColors.text(context),
+                                ),
+                              ),
+                            ),
+                            IconButton(
+                              icon: const Icon(Icons.copy, size: 18),
+                              tooltip: 'Copier',
+                              onPressed: () {
+                                Clipboard.setData(
+                                  ClipboardData(text: generatedPassword),
+                                );
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(
+                                    content: Text('✓ Mot de passe copié'),
+                                    duration: Duration(seconds: 2),
+                                  ),
+                                );
+                              },
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            actions: [
+              ElevatedButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('J\'ai noté le mot de passe'),
+              ),
+            ],
           ),
-          backgroundColor: AppColors.successTheme(context),
-        ),
-      );
+        );
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              '✓ ${_firstNameController.text.trim()} ajouté comme ${ShopUserRole.getLabel(_selectedRole)}',
+            ),
+            backgroundColor: AppColors.successTheme(context),
+          ),
+        );
+      }
+
+      if (!mounted) return;
       Navigator.pop(context, true);
     } else {
       setState(() {
@@ -200,7 +315,6 @@ class _AddUserScreenState extends State<AddUserScreen> {
                     ),
                     child: Row(
                       children: [
-                        // Icône du rôle
                         Container(
                           padding: const EdgeInsets.all(12),
                           decoration: BoxDecoration(
@@ -214,8 +328,6 @@ class _AddUserScreenState extends State<AddUserScreen> {
                           ),
                         ),
                         const SizedBox(width: 12),
-
-                        // Infos du rôle
                         Expanded(
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
@@ -239,8 +351,6 @@ class _AddUserScreenState extends State<AddUserScreen> {
                             ],
                           ),
                         ),
-
-                        // Radio
                         Icon(
                           isSelected
                               ? Icons.radio_button_checked

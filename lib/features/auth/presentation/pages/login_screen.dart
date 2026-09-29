@@ -5,6 +5,7 @@ import '../../../../core/services/auth_service.dart';
 import '../../../../core/services/subscription_service.dart';
 import '../../../../core/theme/app_theme.dart';
 import '../widgets/custom_text_field.dart';
+import 'change_password_screen.dart';
 import 'register_screen.dart';
 
 class LoginScreen extends StatefulWidget {
@@ -44,7 +45,21 @@ class _LoginScreenState extends State<LoginScreen> {
 
       if (!mounted) return;
 
-      // ✅ Succès → navigation vers OTP
+      // ⚡ Vérifier si l'utilisateur doit changer son mot de passe
+      final user = AuthService.instance.user;
+      final mustChange = user?['must_change_password'] == true;
+
+      if (mustChange) {
+        Navigator.of(context).pushAndRemoveUntil(
+          MaterialPageRoute(
+            builder: (_) => const ChangePasswordScreen(isForced: true),
+          ),
+          (route) => false,
+        );
+        return;
+      }
+
+      // ✅ Succès → dashboard
       Navigator.of(context).pushAndRemoveUntil(
         MaterialPageRoute(builder: (_) => const MainNavigationScreen()),
         (route) => false,

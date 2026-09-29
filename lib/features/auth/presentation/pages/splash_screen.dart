@@ -8,6 +8,7 @@ import '../../../../core/services/shop_settings_service.dart';
 import '../../../../core/services/subscription_service.dart';
 import '../../../../core/theme/app_theme.dart';
 import '../../../navigation/presentation/pages/main_navigation_screen.dart';
+import 'change_password_screen.dart';
 import 'login_screen.dart';
 import 'onboarding_screen.dart';
 
@@ -31,21 +32,32 @@ class _SplashScreenState extends State<SplashScreen> {
 
     if (!mounted) return;
 
-    // 1️⃣ Utilisateur déjà connecté → Dashboard direct
+    // ⚡ 1. Vérifier si l'utilisateur doit changer son mot de passe
+    final user = AuthService.instance.user;
+    final mustChange = user?['must_change_password'] == true;
+
     if (AuthService.instance.isAuthenticated) {
       await SubscriptionService.instance.refreshSubscription();
 
       if (!mounted) return;
 
+      if (mustChange) {
+        // ⚡ Forcer le changement de mot de passe
+        Navigator.of(context).pushReplacement(
+          MaterialPageRoute(
+            builder: (_) => const ChangePasswordScreen(isForced: true),
+          ),
+        );
+        return;
+      }
+
       Navigator.of(context).pushReplacement(
-        MaterialPageRoute(
-          builder: (_) => const MainNavigationScreen(),
-        ),
+        MaterialPageRoute(builder: (_) => const MainNavigationScreen()),
       );
       return;
     }
 
-    // 2️⃣ Onboarding déjà vu → Login direct
+    // ⚡ 2. Onboarding déjà vu → Login
     final hasSeenOnboarding = await OnboardingScreen.hasBeenSeen();
 
     if (!mounted) return;
@@ -55,8 +67,6 @@ class _SplashScreenState extends State<SplashScreen> {
         MaterialPageRoute(builder: (_) => const LoginScreen()),
       );
     } else {
-      // 3️⃣ Première fois → Onboarding
-
       Navigator.of(context).pushReplacement(
         MaterialPageRoute(builder: (_) => const OnboardingScreen()),
       );

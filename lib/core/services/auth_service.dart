@@ -254,4 +254,47 @@ class AuthService extends ChangeNotifier {
     return prefs.getString(_keyVerifiedPhone) != null &&
         (prefs.getBool(_keyDeviceVerified) ?? false);
   }
+
+  // ═══════════════════════════════════════════════════════════
+  // CHANGEMENT DE MOT DE PASSE
+  // ═══════════════════════════════════════════════════════════
+
+  Future<Map<String, dynamic>> changePassword({
+    String? oldPassword,
+    required String newPassword,
+  }) async {
+    try {
+      final response = await _apiClient.post('/auth/change-password/', {
+        if (oldPassword != null) 'old_password': oldPassword,
+        'new_password': newPassword,
+      });
+
+      if (response.success && response.body != null) {
+        final data = response.body as Map<String, dynamic>;
+
+        // ⚡ Mettre à jour le user local (must_change_password → false)
+        if (data['user'] != null) {
+          _user = data['user'] as Map<String, dynamic>;
+
+          // Persister dans SharedPreferences
+          final prefs = await SharedPreferences.getInstance();
+          await prefs.setString(_keyUser, jsonEncode(_user));
+        }
+
+        notifyListeners();
+        return {'success': true};
+      }
+
+      // ⚡ Extraire l'erreur du backend
+      String errorMessage = 'Erreur lors du changement';
+      if (response.body is Map && response.body['error'] != null) {
+        errorMessage = response.body['error'] as String;
+      }
+
+      return {'success': false, 'error': errorMessage};
+    } catch (e) {
+      debugPrint('Erreur changePassword');
+      return {'success': false, 'error': 'Erreur de connexion'};
+    }
+  }
 }

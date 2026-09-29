@@ -48,10 +48,19 @@ class ShopUserService {
       });
 
       if (response.success && response.body != null) {
-        return {
+        final data = response.body as Map<String, dynamic>;
+
+        final result = <String, dynamic>{
           'success': true,
-          'user': ShopUser.fromJson(response.body as Map<String, dynamic>),
+          'user': ShopUser.fromJson(data),
         };
+
+        // ⚡ Récupérer le mot de passe généré s'il existe
+        if (data['generated_password'] != null) {
+          result['generated_password'] = data['generated_password'] as String;
+        }
+
+        return result;
       }
 
       // Extraire l'erreur de la réponse
