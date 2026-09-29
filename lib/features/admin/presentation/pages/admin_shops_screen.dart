@@ -29,25 +29,22 @@ class _AdminShopsScreenState extends State<AdminShopsScreen>
   List<AdminShop> _allShops = [];
   List<AdminShop> _filteredShops = [];
   bool _isLoading = true;
-  String? _error;
 
-  // ⚡ Tri et filtres
-  String _sortBy = 'name'; // name, revenue, date, days_asc, days_desc
-  String? _planFilter; // null = tous, sinon ESSENTIEL/PRO/BUSINESS
+  String _sortBy = 'name';
+  String? _planFilter;
 
   @override
   void initState() {
     super.initState();
     _tabController = TabController(
-      length: 5,
+      length: 7,
       vsync: this,
-      initialIndex: widget.initialTab.clamp(0, 4),
+      initialIndex: widget.initialTab.clamp(0, 6),
     );
     _tabController.addListener(() {
       if (!_tabController.indexIsChanging) _applyFilter();
     });
 
-    // ⚡ Appliquer le tri initial si passé en argument
     if (widget.initialSort != null) {
       _sortBy = widget.initialSort!;
     }
@@ -63,10 +60,7 @@ class _AdminShopsScreenState extends State<AdminShopsScreen>
   }
 
   Future<void> _loadShops() async {
-    setState(() {
-      _isLoading = true;
-      _error = null;
-    });
+    setState(() => _isLoading = true);
 
     final shops = await AdminService.instance.getShops();
 
@@ -75,9 +69,6 @@ class _AdminShopsScreenState extends State<AdminShopsScreen>
     setState(() {
       _allShops = shops;
       _isLoading = false;
-      if (shops.isEmpty) {
-        _error = 'Aucune boutique trouvée';
-      }
     });
     _applyFilter();
   }
@@ -85,9 +76,7 @@ class _AdminShopsScreenState extends State<AdminShopsScreen>
   void _applyFilter() {
     final query = _searchController.text.toLowerCase();
 
-    // 1. Filtres
     var result = _allShops.where((shop) {
-      // Onglet
       bool matchesTab = true;
       switch (_tabController.index) {
         case 1:
@@ -102,21 +91,24 @@ class _AdminShopsScreenState extends State<AdminShopsScreen>
         case 4:
           matchesTab = shop.status == 'EXPIRED';
           break;
+        case 5:
+          matchesTab = shop.status == 'PENDING_VALIDATION';
+          break;
+        case 6:
+          matchesTab = shop.status == 'CANCELLED';
+          break;
       }
 
-      // Recherche
       bool matchesSearch = query.isEmpty ||
           shop.name.toLowerCase().contains(query) ||
           shop.ownerName.toLowerCase().contains(query) ||
           shop.phone.toLowerCase().contains(query);
 
-      // Filtre plan
       bool matchesPlan = _planFilter == null || shop.plan == _planFilter;
 
       return matchesTab && matchesSearch && matchesPlan;
     }).toList();
 
-    // 2. Tri
     switch (_sortBy) {
       case 'name':
         result.sort(
@@ -282,12 +274,13 @@ class _AdminShopsScreenState extends State<AdminShopsScreen>
             Tab(text: 'Essai'),
             Tab(text: 'Grâce'),
             Tab(text: 'Expirées'),
+            Tab(text: 'En attente'),
+            Tab(text: 'Annulées'),
           ],
         ),
       ),
       body: Column(
         children: [
-          // Barre de recherche
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
             child: TextField(
@@ -319,8 +312,6 @@ class _AdminShopsScreenState extends State<AdminShopsScreen>
               ),
             ),
           ),
-
-          // ⚡ Barre de filtres / tri
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16),
             child: Row(
@@ -351,8 +342,6 @@ class _AdminShopsScreenState extends State<AdminShopsScreen>
             ),
           ),
           const SizedBox(height: 8),
-
-          // Liste
           Expanded(
             child: _isLoading
                 ? Center(
@@ -470,10 +459,14 @@ class _AdminShopsScreenState extends State<AdminShopsScreen>
 
   Widget _buildShopTile(AdminShop shop) {
     final statusColor = _getStatusColor(shop.status);
-    // ⚡ Alerte si expire bientôt
     final isExpiringSoon = shop.status != 'EXPIRED' &&
+        shop.status != 'CANCELLED' &&
+        shop.status != 'PENDING_VALIDATION' &&
         shop.daysRemaining > 0 &&
         shop.daysRemaining <= 7;
+
+    final isPending = shop.status == 'PENDING_VALIDATION';
+    final isCancelled = shop.status == 'CANCELLED';
 
     return GestureDetector(
       onTap: () => _showShopDetails(shop),
@@ -484,16 +477,19 @@ class _AdminShopsScreenState extends State<AdminShopsScreen>
           color: AppColors.card(context),
           borderRadius: BorderRadius.circular(16),
           border: Border.all(
-            color: isExpiringSoon
-                ? AppColors.dangerTheme(context).withOpacity(0.4)
-                : AppColors.border(context),
-            width: isExpiringSoon ? 2 : 1,
+            color: isPending
+                ? AppColors.warningTheme(context).withOpacity(0.5)
+                : isCancelled
+                    ? AppColors.dangerTheme(context).withOpacity(0.5)
+                    : isExpiringSoon
+                        ? AppColors.dangerTheme(context).withOpacity(0.4)
+                        : AppColors.border(context),
+            width: (isPending || isCancelled || isExpiringSoon) ? 2 : 1,
           ),
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Ligne 1 : Nom + Statut
             Row(
               children: [
                 Container(
@@ -538,6 +534,14 @@ class _AdminShopsScreenState extends State<AdminShopsScreen>
                               Icons.warning_amber_rounded,
                               size: 16,
                               color: AppColors.dangerTheme(context),
+                            ),
+                          ],
+                          if (isPending) ...[
+                            const SizedBox(width: 4),
+                            Icon(
+                              Icons.hourglass_top,
+                              size: 16,
+                              color: AppColors.warningTheme(context),
                             ),
                           ],
                         ],
@@ -585,11 +589,8 @@ class _AdminShopsScreenState extends State<AdminShopsScreen>
               ],
             ),
             const SizedBox(height: 12),
-
             Divider(height: 1, color: AppColors.border(context)),
             const SizedBox(height: 12),
-
-            // Ligne 2 : Plan, Jours, Total payé
             Row(
               children: [
                 Expanded(
@@ -672,6 +673,10 @@ class _AdminShopsScreenState extends State<AdminShopsScreen>
         return AppColors.warningTheme(context);
       case 'EXPIRED':
         return AppColors.dangerTheme(context);
+      case 'PENDING_VALIDATION':
+        return AppColors.warningTheme(context);
+      case 'CANCELLED':
+        return AppColors.textSec(context);
       default:
         return AppColors.textSec(context);
     }
@@ -691,7 +696,7 @@ class _AdminShopsScreenState extends State<AdminShopsScreen>
   }
 
   // ═══════════════════════════════════════════════════════════
-  // MODAL DÉTAIL BOUTIQUE (enrichi)
+  // MODAL DÉTAIL BOUTIQUE
   // ═══════════════════════════════════════════════════════════
   void _showShopDetails(AdminShop shop) {
     showModalBottomSheet(
@@ -710,7 +715,6 @@ class _AdminShopsScreenState extends State<AdminShopsScreen>
           ),
           child: Column(
             children: [
-              // Poignée
               Padding(
                 padding: const EdgeInsets.only(top: 12),
                 child: Center(
@@ -732,7 +736,6 @@ class _AdminShopsScreenState extends State<AdminShopsScreen>
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      // En-tête
                       Row(
                         children: [
                           Container(
@@ -780,7 +783,6 @@ class _AdminShopsScreenState extends State<AdminShopsScreen>
                       ),
                       const SizedBox(height: 24),
 
-                      // Informations
                       _buildSectionTitle('Informations'),
                       _buildDetailRow('Propriétaire', shop.ownerName),
                       _buildDetailRow('Téléphone', shop.phone),
@@ -797,9 +799,49 @@ class _AdminShopsScreenState extends State<AdminShopsScreen>
                       _buildDetailRow(
                           'Créée le', AppFormatters.formatDate(shop.createdAt)),
 
+                      // ⚡ Section annulation
+                      if (shop.status == 'CANCELLED') ...[
+                        const SizedBox(height: 20),
+                        _buildSectionTitle('Annulation'),
+                        Container(
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            color:
+                                AppColors.dangerTheme(context).withOpacity(0.1),
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(
+                              color: AppColors.dangerTheme(context)
+                                  .withOpacity(0.3),
+                            ),
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                children: [
+                                  Icon(
+                                    Icons.cancel,
+                                    size: 16,
+                                    color: AppColors.dangerTheme(context),
+                                  ),
+                                  const SizedBox(width: 8),
+                                  Text(
+                                    'Abonnement annulé',
+                                    style: TextStyle(
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.bold,
+                                      color: AppColors.dangerTheme(context),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+
                       const SizedBox(height: 20),
 
-                      // Paiements
                       _buildSectionTitle('Paiements (${shop.paymentCount})'),
                       _buildDetailRow('Total payé',
                           AppFormatters.formatCurrency(shop.totalPaid)),
@@ -809,16 +851,18 @@ class _AdminShopsScreenState extends State<AdminShopsScreen>
 
                       const SizedBox(height: 12),
 
-                      // ⚡ Historique des paiements
                       _buildPaymentsHistory(shop.id),
 
                       const SizedBox(height: 24),
+
+                      // ⚡ Actions secondaires
+                      _buildAdminActions(shop),
                     ],
                   ),
                 ),
               ),
 
-              // Actions fixes en bas
+              // Actions principales fixes
               Container(
                 padding: const EdgeInsets.all(16),
                 decoration: BoxDecoration(
@@ -831,7 +875,6 @@ class _AdminShopsScreenState extends State<AdminShopsScreen>
                   top: false,
                   child: Row(
                     children: [
-                      // WhatsApp
                       if (shop.phone.isNotEmpty && shop.phone != '—')
                         Expanded(
                           child: OutlinedButton.icon(
@@ -851,7 +894,6 @@ class _AdminShopsScreenState extends State<AdminShopsScreen>
                         ),
                       if (shop.phone.isNotEmpty && shop.phone != '—')
                         const SizedBox(width: 8),
-                      // Prolonger
                       Expanded(
                         child: ElevatedButton.icon(
                           onPressed: () => _extendSubscription(shop),
@@ -875,6 +917,324 @@ class _AdminShopsScreenState extends State<AdminShopsScreen>
     );
   }
 
+  // ═══════════════════════════════════════════════════════════
+  // ACTIONS ADMIN (essai gratuit, annuler, réactiver)
+  // ═══════════════════════════════════════════════════════════
+  Widget _buildAdminActions(AdminShop shop) {
+    final isPending = shop.status == 'PENDING_VALIDATION';
+    final isCancelled = shop.status == 'CANCELLED';
+    final isExpired = shop.status == 'EXPIRED';
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _buildSectionTitle('Actions administrateur'),
+        const SizedBox(height: 8),
+
+        // ⚡ Accorder un essai gratuit
+        if (isPending || isExpired)
+          SizedBox(
+            width: double.infinity,
+            child: ElevatedButton.icon(
+              onPressed: () => _grantTrial(shop),
+              icon: const Icon(Icons.card_giftcard, size: 18),
+              label: const Text('Accorder un essai gratuit'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.blue,
+                foregroundColor: Colors.white,
+                minimumSize: const Size(double.infinity, 48),
+              ),
+            ),
+          ),
+
+        if (isPending || isExpired) const SizedBox(height: 8),
+
+        // ⚡ Annuler l'abonnement
+        if (!isCancelled && !isPending)
+          SizedBox(
+            width: double.infinity,
+            child: OutlinedButton.icon(
+              onPressed: () => _cancelSubscription(shop),
+              icon: const Icon(Icons.cancel_outlined, size: 18),
+              label: const Text('Annuler l\'abonnement'),
+              style: OutlinedButton.styleFrom(
+                minimumSize: const Size(double.infinity, 48),
+                side: BorderSide(color: AppColors.dangerTheme(context)),
+                foregroundColor: AppColors.dangerTheme(context),
+              ),
+            ),
+          ),
+
+        // ⚡ Réactiver
+        if (isCancelled || isExpired)
+          SizedBox(
+            width: double.infinity,
+            child: ElevatedButton.icon(
+              onPressed: () => _reactivateShop(shop),
+              icon: const Icon(Icons.refresh, size: 18),
+              label: const Text('Réactiver la boutique'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppColors.green(context),
+                foregroundColor: AppColors.onGreen(context),
+                minimumSize: const Size(double.infinity, 48),
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+
+  // ═══════════════════════════════════════════════════════════
+  // ACCORDER UN ESSAI GRATUIT
+  // ═══════════════════════════════════════════════════════════
+  Future<void> _grantTrial(AdminShop shop) async {
+    int selectedDays = 15;
+    String selectedPlan = 'ESSENTIEL';
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          title: const Text('Accorder un essai gratuit'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Boutique : ${shop.name}',
+                style: const TextStyle(fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 16),
+
+              // Durée
+              const Text('Durée de l\'essai', style: TextStyle(fontSize: 13)),
+              const SizedBox(height: 8),
+              Wrap(
+                spacing: 8,
+                children: [7, 15, 30, 60].map((d) {
+                  return ChoiceChip(
+                    label: Text('$d jours'),
+                    selected: selectedDays == d,
+                    onSelected: (_) => setDialogState(() => selectedDays = d),
+                  );
+                }).toList(),
+              ),
+              const SizedBox(height: 16),
+
+              // Plan
+              const Text('Plan accordé', style: TextStyle(fontSize: 13)),
+              const SizedBox(height: 8),
+              Wrap(
+                spacing: 8,
+                children: ['ESSENTIEL', 'PRO', 'BUSINESS'].map((p) {
+                  return ChoiceChip(
+                    label: Text(p),
+                    selected: selectedPlan == p,
+                    onSelected: (_) => setDialogState(() => selectedPlan = p),
+                  );
+                }).toList(),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Annuler'),
+            ),
+            ElevatedButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('Accorder'),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    if (confirmed != true) return;
+    if (!mounted) return;
+
+    final result = await AdminService.instance.grantTrial(
+      shopId: shop.id,
+      days: selectedDays,
+      plan: selectedPlan,
+    );
+
+    if (!mounted) return;
+
+    if (result['success'] == true) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(result['message'] as String? ?? '✓ Essai accordé'),
+          backgroundColor: AppColors.successTheme(context),
+        ),
+      );
+      Navigator.pop(context);
+      _loadShops();
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(result['error'] as String? ?? 'Erreur'),
+          backgroundColor: AppColors.dangerTheme(context),
+        ),
+      );
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════
+  // ANNULER L'ABONNEMENT
+  // ═══════════════════════════════════════════════════════════
+  Future<void> _cancelSubscription(AdminShop shop) async {
+    final controller = TextEditingController();
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Annuler l\'abonnement ?'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Boutique : ${shop.name}',
+              style: const TextStyle(fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 12),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: AppColors.dangerTheme(context).withOpacity(0.1),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Text(
+                '⚠️ Cette action va immédiatement bloquer l\'accès à la boutique.',
+                style: TextStyle(
+                  fontSize: 12,
+                  color: AppColors.dangerTheme(context),
+                ),
+              ),
+            ),
+            const SizedBox(height: 16),
+            TextField(
+              controller: controller,
+              maxLines: 2,
+              decoration: const InputDecoration(
+                labelText: 'Raison de l\'annulation *',
+                hintText: 'Ex: Paiement non reçu',
+                border: OutlineInputBorder(),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Annuler'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppColors.dangerTheme(context),
+            ),
+            child: const Text('Confirmer'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true) return;
+
+    final reason = controller.text.trim();
+    if (reason.length < 5) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+              content: Text('Raison trop courte (min 5 caractères)')),
+        );
+      }
+      return;
+    }
+
+    if (!mounted) return;
+
+    final result = await AdminService.instance.cancelSubscription(
+      shopId: shop.id,
+      reason: reason,
+    );
+
+    if (!mounted) return;
+
+    if (result['success'] == true) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(result['message'] as String? ?? '✓ Abonnement annulé'),
+          backgroundColor: AppColors.successTheme(context),
+        ),
+      );
+      Navigator.pop(context);
+      _loadShops();
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(result['error'] as String? ?? 'Erreur'),
+          backgroundColor: AppColors.dangerTheme(context),
+        ),
+      );
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════
+  // RÉACTIVER
+  // ═══════════════════════════════════════════════════════════
+  Future<void> _reactivateShop(AdminShop shop) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Réactiver la boutique ?'),
+        content: Text(
+          'Réactiver "${shop.name}" pour 30 jours ?',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Annuler'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Réactiver'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true) return;
+    if (!mounted) return;
+
+    final result = await AdminService.instance.reactivateShop(
+      shopId: shop.id,
+      days: 30,
+    );
+
+    if (!mounted) return;
+
+    if (result['success'] == true) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(result['message'] as String? ?? '✓ Boutique réactivée'),
+          backgroundColor: AppColors.successTheme(context),
+        ),
+      );
+      Navigator.pop(context);
+      _loadShops();
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(result['error'] as String? ?? 'Erreur'),
+          backgroundColor: AppColors.dangerTheme(context),
+        ),
+      );
+    }
+  }
+
   Widget _buildSectionTitle(String title) {
     return Padding(
       padding: const EdgeInsets.only(bottom: 12),
@@ -889,9 +1249,6 @@ class _AdminShopsScreenState extends State<AdminShopsScreen>
     );
   }
 
-  // ═══════════════════════════════════════════════════════════
-  // HISTORIQUE PAIEMENTS (avec état de chargement)
-  // ═══════════════════════════════════════════════════════════
   Widget _buildPaymentsHistory(String shopId) {
     return FutureBuilder<List<Payment>>(
       future: AdminService.instance.getShopPayments(shopId),
@@ -1057,9 +1414,6 @@ class _AdminShopsScreenState extends State<AdminShopsScreen>
     );
   }
 
-  // ═══════════════════════════════════════════════════════════
-  // ACTIONS
-  // ═══════════════════════════════════════════════════════════
   Future<void> _contactWhatsApp(AdminShop shop) async {
     final message = 'Bonjour ${shop.ownerName},\n\n'
         'Nous vous contactons au sujet de votre boutique "${shop.name}" '

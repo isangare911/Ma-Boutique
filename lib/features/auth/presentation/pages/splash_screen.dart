@@ -8,6 +8,8 @@ import '../../../../core/services/shop_settings_service.dart';
 import '../../../../core/services/subscription_service.dart';
 import '../../../../core/theme/app_theme.dart';
 import '../../../navigation/presentation/pages/main_navigation_screen.dart';
+import '../../../subscription/presentation/pages/pending_approval_screen.dart';
+import '../../../subscription/presentation/pages/subscription_screen.dart';
 import 'change_password_screen.dart';
 import 'login_screen.dart';
 import 'onboarding_screen.dart';
@@ -32,17 +34,18 @@ class _SplashScreenState extends State<SplashScreen> {
 
     if (!mounted) return;
 
-    // ⚡ 1. Vérifier si l'utilisateur doit changer son mot de passe
-    final user = AuthService.instance.user;
-    final mustChange = user?['must_change_password'] == true;
-
+    // ⚡ 1. Utilisateur connecté
     if (AuthService.instance.isAuthenticated) {
+      final user = AuthService.instance.user;
+      final mustChange = user?['must_change_password'] == true;
+      final subStatus = user?['shop']?['subscription_status'];
+
       await SubscriptionService.instance.refreshSubscription();
 
       if (!mounted) return;
 
+      // 2. Force le changement de mot de passe
       if (mustChange) {
-        // ⚡ Forcer le changement de mot de passe
         Navigator.of(context).pushReplacement(
           MaterialPageRoute(
             builder: (_) => const ChangePasswordScreen(isForced: true),
@@ -51,13 +54,34 @@ class _SplashScreenState extends State<SplashScreen> {
         return;
       }
 
+      // 3. Statut PENDING_VALIDATION → écran d'attente
+      if (subStatus == 'PENDING_VALIDATION') {
+        Navigator.of(context).pushReplacement(
+          MaterialPageRoute(
+            builder: (_) => const PendingApprovalScreen(),
+          ),
+        );
+        return;
+      }
+
+      // 4. Statut CANCELLED ou EXPIRED → écran abonnement
+      if (subStatus == 'CANCELLED' || subStatus == 'EXPIRED') {
+        Navigator.of(context).pushReplacement(
+          MaterialPageRoute(
+            builder: (_) => const SubscriptionScreen(),
+          ),
+        );
+        return;
+      }
+
+      // 5. Sinon → Dashboard
       Navigator.of(context).pushReplacement(
         MaterialPageRoute(builder: (_) => const MainNavigationScreen()),
       );
       return;
     }
 
-    // ⚡ 2. Onboarding déjà vu → Login
+    // ⚡ Onboarding
     final hasSeenOnboarding = await OnboardingScreen.hasBeenSeen();
 
     if (!mounted) return;

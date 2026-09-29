@@ -75,7 +75,7 @@ class AdminService {
   }
 
   // ═══════════════════════════════════════════════════════════
-  // ⚡ NOUVEAU : Paiements d'une boutique spécifique
+  // Paiements d'une boutique spécifique
   // ═══════════════════════════════════════════════════════════
   Future<List<Payment>> getShopPayments(String shopId) async {
     try {
@@ -136,6 +136,106 @@ class AdminService {
     } catch (e) {
       debugPrint('Exception rejectPayment: $e');
       return false;
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════
+  // ⚡ ACCORDER UN ESSAI GRATUIT
+  // ═══════════════════════════════════════════════════════════
+  Future<Map<String, dynamic>> grantTrial({
+    required String shopId,
+    required int days,
+    required String plan,
+  }) async {
+    try {
+      final response = await _apiClient.post(
+        '/admin/shops/$shopId/grant-trial/',
+        {
+          'days': days,
+          'plan': plan,
+        },
+      );
+
+      if (response.success && response.body != null) {
+        return {
+          'success': true,
+          'message': response.body['message'] ?? 'Essai accordé',
+        };
+      }
+
+      String errorMessage = 'Erreur lors de l\'octroi de l\'essai';
+      if (response.body is Map && response.body['error'] != null) {
+        errorMessage = response.body['error'] as String;
+      }
+
+      return {'success': false, 'error': errorMessage};
+    } catch (e) {
+      debugPrint('Exception grantTrial: $e');
+      return {'success': false, 'error': 'Erreur de connexion'};
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════
+  // ⚡ ANNULER UN ABONNEMENT
+  // ═══════════════════════════════════════════════════════════
+  Future<Map<String, dynamic>> cancelSubscription({
+    required String shopId,
+    required String reason,
+  }) async {
+    try {
+      final response = await _apiClient.post(
+        '/admin/shops/$shopId/cancel-subscription/',
+        {'reason': reason},
+      );
+
+      if (response.success && response.body != null) {
+        return {
+          'success': true,
+          'message': response.body['message'] ?? 'Abonnement annulé',
+        };
+      }
+
+      String errorMessage = 'Erreur lors de l\'annulation';
+      if (response.body is Map && response.body['error'] != null) {
+        errorMessage = response.body['error'] as String;
+      }
+
+      return {'success': false, 'error': errorMessage};
+    } catch (e) {
+      debugPrint('Exception cancelSubscription: $e');
+      return {'success': false, 'error': 'Erreur de connexion'};
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════
+  // ⚡ RÉACTIVER UNE BOUTIQUE
+  // ═══════════════════════════════════════════════════════════
+  Future<Map<String, dynamic>> reactivateShop({
+    required String shopId,
+    int days = 30,
+  }) async {
+    try {
+      final response = await _apiClient.post(
+        '/admin/shops/$shopId/reactivate/',
+        {'days': days},
+      );
+
+      if (response.success && response.body != null) {
+        return {
+          'success': true,
+          'message': response.body['message'] ?? 'Boutique réactivée',
+        };
+      }
+
+      String errorMessage = 'Erreur lors de la réactivation';
+      if (response.body is Map && response.body['error'] != null) {
+        errorMessage = response.body['error'] as String;
+      }
+
+      return {'success': false, 'error': errorMessage};
+    } catch (e) {
+      debugPrint('Exception reactivateShop: $e');
+      return {'success': false, 'error': 'Erreur de connexion'};
     }
   }
 }

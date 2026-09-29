@@ -1,9 +1,10 @@
 import 'package:flutter/material.dart';
 
 import '../../../../core/services/auth_service.dart';
+import '../../../../core/services/subscription_service.dart';
 import '../../../../core/theme/app_theme.dart';
+import '../../../subscription/presentation/pages/subscription_screen.dart';
 import '../widgets/custom_text_field.dart';
-import 'otp_screen.dart';
 
 class RegisterScreen extends StatefulWidget {
   const RegisterScreen({super.key});
@@ -16,6 +17,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
   final _formKey = GlobalKey<FormState>();
   final _nameController = TextEditingController();
   final _phoneController = TextEditingController();
+  final _shopNameController = TextEditingController();
   final _passwordController = TextEditingController();
   bool _obscurePassword = true;
   bool _isLoading = false;
@@ -24,6 +26,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
   void dispose() {
     _nameController.dispose();
     _phoneController.dispose();
+    _shopNameController.dispose();
     _passwordController.dispose();
     super.dispose();
   }
@@ -34,30 +37,34 @@ class _RegisterScreenState extends State<RegisterScreen> {
     setState(() => _isLoading = true);
 
     try {
-      // ⚡ Appeler l'API d'inscription
       final success = await AuthService.instance.register(
         phone: _phoneController.text.trim(),
         password: _passwordController.text,
-        shopName: '${_nameController.text.trim()} - Boutique',
+        shopName: _shopNameController.text.trim(),
         firstName: _nameController.text.trim(),
+        lastName: '',
       );
 
       if (!mounted) return;
 
       if (success) {
-        // ✅ Inscription réussie → aller à l'OTP pour vérifier le numéro
-        Navigator.pushReplacement(
-          context,
+        await SubscriptionService.instance.refreshSubscription();
+
+        if (!mounted) return;
+
+        // ⚡ Aller à l'écran d'abonnement (pas au dashboard)
+        Navigator.of(context).pushAndRemoveUntil(
           MaterialPageRoute(
-            builder: (_) => OtpScreen(
-              phoneNumber: _phoneController.text.trim(),
-            ),
+            builder: (_) => const SubscriptionScreen(isNewUser: true),
           ),
+          (route) => false,
         );
       } else {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: const Text('Erreur lors de l\'inscription'),
+            content: const Text(
+              'Erreur lors de l\'inscription. Vérifiez le numéro de téléphone.',
+            ),
             backgroundColor: AppColors.dangerTheme(context),
           ),
         );
@@ -113,15 +120,33 @@ class _RegisterScreenState extends State<RegisterScreen> {
                 ),
                 const SizedBox(height: 32),
 
-                // Nom
+                // Nom du propriétaire
                 CustomTextField(
-                  label: 'Nom complet',
+                  label: 'Votre nom',
                   hint: 'Moussa Diarra',
                   prefixIcon: Icons.person_outline,
                   controller: _nameController,
                   validator: (value) {
                     if (value == null || value.isEmpty) {
                       return 'Veuillez entrer votre nom';
+                    }
+                    return null;
+                  },
+                ),
+                const SizedBox(height: 20),
+
+                // Nom de la boutique
+                CustomTextField(
+                  label: 'Nom de la boutique',
+                  hint: 'Alimentation Diallo',
+                  prefixIcon: Icons.storefront,
+                  controller: _shopNameController,
+                  validator: (value) {
+                    if (value == null || value.isEmpty) {
+                      return 'Veuillez entrer le nom de votre boutique';
+                    }
+                    if (value.length < 3) {
+                      return 'Nom trop court';
                     }
                     return null;
                   },
@@ -141,6 +166,9 @@ class _RegisterScreenState extends State<RegisterScreen> {
                     }
                     if (!value.startsWith('+')) {
                       return 'Le numéro doit commencer par +';
+                    }
+                    if (value.length < 10) {
+                      return 'Numéro trop court';
                     }
                     return null;
                   },
@@ -195,7 +223,6 @@ class _RegisterScreenState extends State<RegisterScreen> {
                 ),
                 const SizedBox(height: 24),
 
-                // Lien vers Connexion
                 Row(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [

@@ -12,7 +12,6 @@ import 'core/services/sync_service.dart';
 import 'core/services/theme_service.dart';
 import 'core/theme/app_theme.dart';
 import 'data/datasources/local/database_helper.dart';
-import 'data/datasources/local/seed_data.dart';
 import 'features/auth/presentation/pages/splash_screen.dart';
 
 void main() async {
@@ -22,11 +21,12 @@ void main() async {
     await Firebase.initializeApp();
     debugPrint('✓ Firebase initialisé');
   } catch (e) {
-    debugPrint('⚠ Erreur Firebase: $e');
+    debugPrint('⚠ Erreur Firebase');
   }
 
   await DatabaseHelper.instance.database;
-  await SeedData.seedIfEmpty();
+
+  // ⚡ Plus de données de démo — chaque boutique démarre vide
 
   await ShopSettingsService.instance.initialize();
   await NotificationService.instance.initialize();
@@ -37,7 +37,6 @@ void main() async {
 
   NotificationChecker.instance.checkAll();
 
-  // ⚡ Démarrer la vérification périodique
   SubscriptionCheckerService.instance.start();
 
   runApp(const MaBoutiqueApp());
@@ -75,17 +74,13 @@ class SubscriptionCheckerService {
   Timer? _timer;
 
   void start() {
-    // Vérifier toutes les heures
     _timer = Timer.periodic(const Duration(hours: 1), (_) => _check());
-
-    // Première vérification après 30 secondes
     Timer(const Duration(seconds: 30), _check);
   }
 
   Future<void> _check() async {
     if (!AuthService.instance.isAuthenticated) return;
 
-    // ⚡ Vérifier la manipulation de date
     final manipulated = await SubscriptionService.instance.isDateManipulated();
     if (manipulated) {
       debugPrint('🚨 Manipulation détectée → déconnexion forcée');
@@ -93,10 +88,9 @@ class SubscriptionCheckerService {
       return;
     }
 
-    // ⚡ Vérifier si un rafraîchissement est nécessaire
     final needsRefresh = await SubscriptionService.instance.needsRefresh();
     if (needsRefresh) {
-      debugPrint('🔄 Refresh abonnement (dû depuis > 24h)');
+      debugPrint('🔄 Refresh abonnement (> 24h)');
       await SubscriptionService.instance.refreshSubscription();
     }
   }

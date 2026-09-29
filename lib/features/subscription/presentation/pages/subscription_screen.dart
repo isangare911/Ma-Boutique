@@ -5,9 +5,17 @@ import '../../../../core/theme/app_theme.dart';
 import '../../../../core/utils/formatters.dart';
 import '../../../../data/models/subscription.dart';
 import 'mobile_payment_screen.dart';
+import 'pending_approval_screen.dart';
 
 class SubscriptionScreen extends StatefulWidget {
-  const SubscriptionScreen({super.key});
+  /// ⚡ Si true, on affiche un bandeau "Bienvenue" (nouvel abonné).
+  /// Si false, on est dans le flux normal (renouvellement).
+  final bool isNewUser;
+
+  const SubscriptionScreen({
+    super.key,
+    this.isNewUser = false,
+  });
 
   @override
   State<SubscriptionScreen> createState() => _SubscriptionScreenState();
@@ -16,12 +24,12 @@ class SubscriptionScreen extends StatefulWidget {
 class _SubscriptionScreenState extends State<SubscriptionScreen> {
   List<SubscriptionPlan> _plans = [];
   bool _isLoadingPlans = true;
+  bool _isRequestingTrial = false;
 
   @override
   void initState() {
     super.initState();
     _loadPlans();
-    // Rafraîchir l'abonnement au démarrage
     SubscriptionService.instance.refreshSubscription();
   }
 
@@ -40,7 +48,6 @@ class _SubscriptionScreenState extends State<SubscriptionScreen> {
   // ACTIVER UN PLAN (via Mobile Money)
   // ═══════════════════════════════════════════════════════════
   Future<void> _activatePlan(SubscriptionPlan plan) async {
-    // ⚡ Rediriger vers l'écran de paiement Mobile Money
     final result = await Navigator.push(
       context,
       MaterialPageRoute(
@@ -52,7 +59,6 @@ class _SubscriptionScreenState extends State<SubscriptionScreen> {
       ),
     );
 
-    // Si le paiement a réussi, rafraîchir l'abonnement
     if (result == true && mounted) {
       await SubscriptionService.instance.refreshSubscription();
       if (mounted) {
@@ -66,12 +72,60 @@ class _SubscriptionScreenState extends State<SubscriptionScreen> {
     }
   }
 
+  // ═══════════════════════════════════════════════════════════
+  // DEMANDER UN ESSAI GRATUIT
+  // ═══════════════════════════════════════════════════════════
+  Future<void> _requestFreeTrial() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Demander un essai gratuit ?'),
+        content: const Text(
+          'Votre demande sera envoyée à l\'administrateur. '
+          'Vous serez notifié dès qu\'elle sera approuvée.\n\n'
+          'Vous pouvez aussi contacter directement le support '
+          'pour accélérer le traitement.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Annuler'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Envoyer la demande'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true) return;
+
+    setState(() => _isRequestingTrial = true);
+
+    // ⚡ Simuler l'envoi (le backend ne gère pas encore cette notion)
+    // En attendant, on redirige vers l'écran d'attente
+    await Future.delayed(const Duration(milliseconds: 800));
+
+    if (!mounted) return;
+
+    setState(() => _isRequestingTrial = false);
+
+    // Rediriger vers l'écran d'attente
+    Navigator.of(context).pushReplacement(
+      MaterialPageRoute(
+        builder: (_) => const PendingApprovalScreen(),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: AppColors.bg(context),
       appBar: AppBar(
         title: const Text('Abonnement'),
+        automaticallyImplyLeading: !widget.isNewUser,
         actions: [
           IconButton(
             icon: const Icon(Icons.refresh),
@@ -89,8 +143,15 @@ class _SubscriptionScreenState extends State<SubscriptionScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
+                // ⚡ Bandeau "Bienvenue" si nouveau
+                if (widget.isNewUser) ...[
+                  _buildWelcomeBanner(context),
+                  const SizedBox(height: 24),
+                ],
+
+                // Carte de statut (si abonnement existant)
                 if (sub != null) _buildStatusCard(context, sub),
-                const SizedBox(height: 24),
+                if (sub != null) const SizedBox(height: 24),
 
                 Text(
                   'Plans disponibles',
@@ -115,6 +176,12 @@ class _SubscriptionScreenState extends State<SubscriptionScreen> {
                   ..._plans.map((plan) => _buildPlanCard(context, plan)),
 
                 const SizedBox(height: 24),
+
+                // ⚡ Section essai gratuit (uniquement si nouveau)
+                if (widget.isNewUser) ...[
+                  _buildFreeTrialSection(context),
+                  const SizedBox(height: 24),
+                ],
 
                 // Info
                 Container(
@@ -151,10 +218,159 @@ class _SubscriptionScreenState extends State<SubscriptionScreen> {
   }
 
   // ═══════════════════════════════════════════════════════════
+  // BANDEAU BIENVENUE (nouvel abonné)
+  // ═══════════════════════════════════════════════════════════
+  Widget _buildWelcomeBanner(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+            AppColors.green(context),
+            AppColors.green(context).withOpacity(0.7),
+          ],
+        ),
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(
+                Icons.celebration,
+                color: AppColors.onGreen(context),
+                size: 28,
+              ),
+              const SizedBox(width: 12),
+              Text(
+                'Bienvenue !',
+                style: TextStyle(
+                  fontSize: 20,
+                  fontWeight: FontWeight.bold,
+                  color: AppColors.onGreen(context),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Text(
+            'Pour commencer à utiliser Ma Boutique, choisissez un plan d\'abonnement.',
+            style: TextStyle(
+              fontSize: 14,
+              color: AppColors.onGreen(context),
+              height: 1.4,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'Ou demandez un essai gratuit en bas de cette page.',
+            style: TextStyle(
+              fontSize: 13,
+              color: AppColors.onGreen(context).withOpacity(0.9),
+              fontStyle: FontStyle.italic,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ═══════════════════════════════════════════════════════════
+  // SECTION ESSAI GRATUIT
+  // ═══════════════════════════════════════════════════════════
+  Widget _buildFreeTrialSection(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: AppColors.card(context),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: AppColors.warningTheme(context).withOpacity(0.4),
+          width: 2,
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: AppColors.warningTheme(context).withOpacity(0.15),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Icon(
+                  Icons.card_giftcard,
+                  color: AppColors.warningTheme(context),
+                  size: 22,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  'Essai gratuit',
+                  style: TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                    color: AppColors.text(context),
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Text(
+            'Vous préférez tester avant de payer ? Demandez un essai gratuit. '
+            'L\'administrateur validera votre demande et vous recevrez une '
+            'confirmation dès que votre compte sera activé.',
+            style: TextStyle(
+              fontSize: 13,
+              color: AppColors.textSec(context),
+              height: 1.4,
+            ),
+          ),
+          const SizedBox(height: 16),
+          OutlinedButton.icon(
+            onPressed: _isRequestingTrial ? null : _requestFreeTrial,
+            icon: _isRequestingTrial
+                ? SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: AppColors.warningTheme(context),
+                    ),
+                  )
+                : const Icon(Icons.card_giftcard),
+            label: Text(
+              _isRequestingTrial
+                  ? 'Envoi en cours...'
+                  : 'Demander un essai gratuit',
+            ),
+            style: OutlinedButton.styleFrom(
+              minimumSize: const Size(double.infinity, 50),
+              side: BorderSide(color: AppColors.warningTheme(context)),
+              foregroundColor: AppColors.warningTheme(context),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ═══════════════════════════════════════════════════════════
   // CARTE STATUT ABONNEMENT
   // ═══════════════════════════════════════════════════════════
   Widget _buildStatusCard(BuildContext context, Subscription sub) {
-    // Couleur selon le statut
     Color statusColor;
     IconData statusIcon;
 
@@ -220,8 +436,6 @@ class _SubscriptionScreenState extends State<SubscriptionScreen> {
             ],
           ),
           const SizedBox(height: 20),
-
-          // Jours restants
           if (sub.canSell) ...[
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -244,7 +458,6 @@ class _SubscriptionScreenState extends State<SubscriptionScreen> {
               ],
             ),
             const SizedBox(height: 12),
-            // Barre de progression (sur 30 jours)
             ClipRRect(
               borderRadius: BorderRadius.circular(6),
               child: LinearProgressIndicator(
@@ -279,7 +492,6 @@ class _SubscriptionScreenState extends State<SubscriptionScreen> {
               ),
             ),
           ],
-
           if (sub.end != null) ...[
             const SizedBox(height: 12),
             Text(
@@ -372,8 +584,6 @@ class _SubscriptionScreenState extends State<SubscriptionScreen> {
             ],
           ),
           const SizedBox(height: 16),
-
-          // Features
           ...plan.features.map((feature) => Padding(
                 padding: const EdgeInsets.only(bottom: 8),
                 child: Row(
@@ -393,10 +603,7 @@ class _SubscriptionScreenState extends State<SubscriptionScreen> {
                   ],
                 ),
               )),
-
           const SizedBox(height: 16),
-
-          // Bouton
           ElevatedButton(
             onPressed: () => _activatePlan(plan),
             style: ElevatedButton.styleFrom(
