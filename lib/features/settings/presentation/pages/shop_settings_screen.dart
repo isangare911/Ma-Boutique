@@ -1,9 +1,10 @@
 import 'dart:io';
 
-import 'package:boutique/core/services/notification_cheker.dart';
 import 'package:flutter/material.dart';
 
+import '../../../../core/services/auth_service.dart';
 import '../../../../core/services/logo_service.dart';
+import '../../../../core/services/notification_cheker.dart';
 import '../../../../core/services/shop_settings_service.dart';
 import '../../../../core/services/theme_service.dart';
 import '../../../../core/theme/app_theme.dart';
@@ -29,11 +30,27 @@ class _ShopSettingsScreenState extends State<ShopSettingsScreen> {
   @override
   void initState() {
     super.initState();
+
+    // ⚡ Lire les settings actuels (déjà chargés par le service)
     final settings = ShopSettingsService.instance.settings;
-    _nameController = TextEditingController(text: settings.shopName);
-    _phoneController = TextEditingController(text: settings.phone ?? '');
-    _addressController = TextEditingController(text: settings.address ?? '');
-    _ownerController = TextEditingController(text: settings.ownerName ?? '');
+    final user = AuthService.instance.user;
+    final shopData = user?['shop'] as Map<String, dynamic>?;
+
+    // ⚡ Priorité : settings locaux > données serveur
+    _nameController = TextEditingController(
+      text: settings.shopName.isNotEmpty
+          ? settings.shopName
+          : (shopData?['name'] as String? ?? ''),
+    );
+    _phoneController = TextEditingController(
+      text: settings.phone ?? (shopData?['phone'] as String?) ?? '',
+    );
+    _addressController = TextEditingController(
+      text: settings.address ?? (shopData?['address'] as String?) ?? '',
+    );
+    _ownerController = TextEditingController(
+      text: settings.ownerName ?? (shopData?['owner_name'] as String?) ?? '',
+    );
     _currency = settings.currency;
     _logoPath = settings.shopLogoPath;
   }
@@ -149,10 +166,7 @@ class _ShopSettingsScreenState extends State<ShopSettingsScreen> {
         ),
         child: Icon(icon, color: c),
       ),
-      title: Text(
-        label,
-        style: TextStyle(color: color),
-      ),
+      title: Text(label, style: TextStyle(color: color)),
       onTap: onTap,
     );
   }
@@ -191,7 +205,7 @@ class _ShopSettingsScreenState extends State<ShopSettingsScreen> {
     try {
       final current = ShopSettingsService.instance.settings;
       final updated = current.copyWith(
-        id: ShopSettings.defaultId,
+        // ⚡ Plus de ShopSettings.defaultId — l'id est déjà dans current
         shopName: _nameController.text.trim(),
         phone: _phoneController.text.trim().isEmpty
             ? null
@@ -385,9 +399,6 @@ class _ShopSettingsScreenState extends State<ShopSettingsScreen> {
               ),
               const SizedBox(height: 32),
 
-              // ═══════════════════════════════════════════════
-              // SECTION APPARENCE (MODE SOMBRE)
-              // ═══════════════════════════════════════════════
               _buildSectionTitle(context, 'Apparence'),
               const SizedBox(height: 12),
 
@@ -440,9 +451,6 @@ class _ShopSettingsScreenState extends State<ShopSettingsScreen> {
               ),
               const SizedBox(height: 32),
 
-              // ═══════════════════════════════════════════════
-              // BOUTON ENREGISTRER
-              // ═══════════════════════════════════════════════
               ElevatedButton.icon(
                 onPressed: _isSaving ? null : _save,
                 icon: _isSaving
@@ -459,9 +467,6 @@ class _ShopSettingsScreenState extends State<ShopSettingsScreen> {
               ),
               const SizedBox(height: 12),
 
-              // ═══════════════════════════════════════════════
-              // BOUTON TESTER LES NOTIFICATIONS
-              // ═══════════════════════════════════════════════
               OutlinedButton.icon(
                 onPressed: _testNotifications,
                 icon: const Icon(Icons.notifications_active),

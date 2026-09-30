@@ -30,7 +30,7 @@ class _SubscriptionScreenState extends State<SubscriptionScreen> {
   void initState() {
     super.initState();
     _loadPlans();
-    SubscriptionService.instance.refreshSubscription();
+    // ⚡ Ne PAS appeler refreshSubscription ici — ça déclenche un setState pendant le build
   }
 
   Future<void> _loadPlans() async {
@@ -103,15 +103,12 @@ class _SubscriptionScreenState extends State<SubscriptionScreen> {
 
     setState(() => _isRequestingTrial = true);
 
-    // ⚡ Simuler l'envoi (le backend ne gère pas encore cette notion)
-    // En attendant, on redirige vers l'écran d'attente
     await Future.delayed(const Duration(milliseconds: 800));
 
     if (!mounted) return;
 
     setState(() => _isRequestingTrial = false);
 
-    // Rediriger vers l'écran d'attente
     Navigator.of(context).pushReplacement(
       MaterialPageRoute(
         builder: (_) => const PendingApprovalScreen(),
@@ -149,9 +146,11 @@ class _SubscriptionScreenState extends State<SubscriptionScreen> {
                   const SizedBox(height: 24),
                 ],
 
-                // Carte de statut (si abonnement existant)
-                if (sub != null) _buildStatusCard(context, sub),
-                if (sub != null) const SizedBox(height: 24),
+                // ⚡ Carte de statut (sauf si PENDING_VALIDATION)
+                if (sub != null && sub.status != 'PENDING_VALIDATION')
+                  _buildStatusCard(context, sub),
+                if (sub != null && sub.status != 'PENDING_VALIDATION')
+                  const SizedBox(height: 24),
 
                 Text(
                   'Plans disponibles',
@@ -177,11 +176,10 @@ class _SubscriptionScreenState extends State<SubscriptionScreen> {
 
                 const SizedBox(height: 24),
 
-                // ⚡ Section essai gratuit (uniquement si nouveau)
-                if (widget.isNewUser) ...[
-                  _buildFreeTrialSection(context),
-                  const SizedBox(height: 24),
-                ],
+                // ⚡ Section essai gratuit
+                _buildFreeTrialSection(context),
+
+                const SizedBox(height: 24),
 
                 // Info
                 Container(
@@ -218,7 +216,7 @@ class _SubscriptionScreenState extends State<SubscriptionScreen> {
   }
 
   // ═══════════════════════════════════════════════════════════
-  // BANDEAU BIENVENUE (nouvel abonné)
+  // BANDEAU BIENVENUE
   // ═══════════════════════════════════════════════════════════
   Widget _buildWelcomeBanner(BuildContext context) {
     return Container(

@@ -2,12 +2,16 @@ import 'dart:convert';
 
 import 'package:sqflite/sqflite.dart';
 
+import '../../../core/services/current_shop.dart';
 import '../../../core/services/sync_service.dart';
 import '../../models/product.dart';
 import 'database_helper.dart';
 
 class ProductDao {
   final DatabaseHelper _dbHelper = DatabaseHelper.instance;
+
+  /// ⚡ Récupère le shop_id courant, ou null si non connecté
+  String? get _shopId => CurrentShop.shopId;
 
   // ═══════════════════════════════════════════════════════════
   // CRÉER
@@ -37,7 +41,6 @@ class ProductDao {
       conflictAlgorithm: ConflictAlgorithm.replace,
     );
 
-    // Ajouter à la file de synchronisation
     await _addToSyncQueue(
       operationType: 'CREATE',
       entityType: 'PRODUCT',
@@ -49,20 +52,31 @@ class ProductDao {
   }
 
   // ═══════════════════════════════════════════════════════════
-  // LIRE
+  // LIRE (filtré par shop_id)
   // ═══════════════════════════════════════════════════════════
   Future<List<Product>> getAllProducts() async {
+    final shopId = _shopId;
+    if (shopId == null) return [];
+
     final db = await _dbHelper.database;
-    final result = await db.query('products', orderBy: 'name ASC');
+    final result = await db.query(
+      'products',
+      where: 'shop_id = ?',
+      whereArgs: [shopId],
+      orderBy: 'name ASC',
+    );
     return result.map((map) => _productFromMap(map)).toList();
   }
 
   Future<Product?> getProductById(String id) async {
+    final shopId = _shopId;
+    if (shopId == null) return null;
+
     final db = await _dbHelper.database;
     final result = await db.query(
       'products',
-      where: 'id = ?',
-      whereArgs: [id],
+      where: 'id = ? AND shop_id = ?',
+      whereArgs: [id, shopId],
       limit: 1,
     );
     if (result.isEmpty) return null;
@@ -70,31 +84,43 @@ class ProductDao {
   }
 
   Future<List<Product>> searchProducts(String query) async {
+    final shopId = _shopId;
+    if (shopId == null) return [];
+
     final db = await _dbHelper.database;
     final result = await db.query(
       'products',
-      where: 'name LIKE ? OR category LIKE ? OR reference LIKE ?',
-      whereArgs: ['%$query%', '%$query%', '%$query%'],
+      where:
+          'shop_id = ? AND (name LIKE ? OR category LIKE ? OR reference LIKE ?)',
+      whereArgs: [shopId, '%$query%', '%$query%', '%$query%'],
       orderBy: 'name ASC',
     );
     return result.map((map) => _productFromMap(map)).toList();
   }
 
   Future<List<Product>> getOutOfStockProducts() async {
+    final shopId = _shopId;
+    if (shopId == null) return [];
+
     final db = await _dbHelper.database;
     final result = await db.query(
       'products',
-      where: 'quantity = 0',
+      where: 'shop_id = ? AND quantity = 0',
+      whereArgs: [shopId],
       orderBy: 'name ASC',
     );
     return result.map((map) => _productFromMap(map)).toList();
   }
 
   Future<List<Product>> getLowStockProducts() async {
+    final shopId = _shopId;
+    if (shopId == null) return [];
+
     final db = await _dbHelper.database;
     final result = await db.query(
       'products',
-      where: 'quantity > 0 AND quantity <= alert_threshold',
+      where: 'shop_id = ? AND quantity > 0 AND quantity <= alert_threshold',
+      whereArgs: [shopId],
       orderBy: 'quantity ASC',
     );
     return result.map((map) => _productFromMap(map)).toList();
@@ -122,8 +148,8 @@ class ProductDao {
         'image_path': product.imagePath,
         'updated_at': now,
       },
-      where: 'id = ?',
-      whereArgs: [product.id],
+      where: 'id = ? AND shop_id = ?',
+      whereArgs: [product.id, shopId],
     );
 
     await _addToSyncQueue(
@@ -134,8 +160,10 @@ class ProductDao {
     );
   }
 
-  // Décrémenter le stock (appelé après une vente)
   Future<void> decrementStock(String productId, int quantity) async {
+    final shopId = _shopId;
+    if (shopId == null) return;
+
     final db = await _dbHelper.database;
     final product = await getProductById(productId);
     if (product == null) return;
@@ -148,20 +176,22 @@ class ProductDao {
         'quantity': newQuantity,
         'updated_at': DateTime.now().toIso8601String(),
       },
-      where: 'id = ?',
-      whereArgs: [productId],
+      where: 'id = ? AND shop_id = ?',
+      whereArgs: [productId, shopId],
     );
 
     await _addToSyncQueue(
       operationType: 'UPDATE',
       entityType: 'PRODUCT',
       entityId: productId,
-      payload: {'id': productId, 'quantity': newQuantity},
+      payload: {'id': productId, 'shop_id': shopId, 'quantity': newQuantity},
     );
   }
 
-  // Incrémenter le stock (appelé après un réapprovisionnement)
   Future<void> incrementStock(String productId, int quantity) async {
+    final shopId = _shopId;
+    if (shopId == null) return;
+
     final db = await _dbHelper.database;
     final product = await getProductById(productId);
     if (product == null) return;
@@ -174,15 +204,15 @@ class ProductDao {
         'quantity': newQuantity,
         'updated_at': DateTime.now().toIso8601String(),
       },
-      where: 'id = ?',
-      whereArgs: [productId],
+      where: 'id = ? AND shop_id = ?',
+      whereArgs: [productId, shopId],
     );
 
     await _addToSyncQueue(
       operationType: 'UPDATE',
       entityType: 'PRODUCT',
       entityId: productId,
-      payload: {'id': productId, 'quantity': newQuantity},
+      payload: {'id': productId, 'shop_id': shopId, 'quantity': newQuantity},
     );
   }
 
@@ -190,42 +220,59 @@ class ProductDao {
   // SUPPRIMER
   // ═══════════════════════════════════════════════════════════
   Future<void> deleteProduct(String id) async {
+    final shopId = _shopId;
+    if (shopId == null) return;
+
     final db = await _dbHelper.database;
     await db.delete(
       'products',
-      where: 'id = ?',
-      whereArgs: [id],
+      where: 'id = ? AND shop_id = ?',
+      whereArgs: [id, shopId],
     );
 
     await _addToSyncQueue(
       operationType: 'DELETE',
       entityType: 'PRODUCT',
       entityId: id,
-      payload: {'id': id},
+      payload: {'id': id, 'shop_id': shopId},
     );
   }
 
   // ═══════════════════════════════════════════════════════════
-  // STATISTIQUES
+  // STATISTIQUES (filtré par shop_id)
   // ═══════════════════════════════════════════════════════════
   Future<int> getTotalProducts() async {
+    final shopId = _shopId;
+    if (shopId == null) return 0;
+
     final db = await _dbHelper.database;
-    final result = await db.rawQuery('SELECT COUNT(*) FROM products');
+    final result = await db.rawQuery(
+      'SELECT COUNT(*) FROM products WHERE shop_id = ?',
+      [shopId],
+    );
     return Sqflite.firstIntValue(result) ?? 0;
   }
 
   Future<int> getOutOfStockCount() async {
+    final shopId = _shopId;
+    if (shopId == null) return 0;
+
     final db = await _dbHelper.database;
     final result = await db.rawQuery(
-      'SELECT COUNT(*) FROM products WHERE quantity = 0',
+      'SELECT COUNT(*) FROM products WHERE shop_id = ? AND quantity = 0',
+      [shopId],
     );
     return Sqflite.firstIntValue(result) ?? 0;
   }
 
   Future<double> getTotalStockValue() async {
+    final shopId = _shopId;
+    if (shopId == null) return 0.0;
+
     final db = await _dbHelper.database;
     final result = await db.rawQuery(
-      'SELECT SUM(quantity * purchase_price) FROM products',
+      'SELECT SUM(quantity * purchase_price) FROM products WHERE shop_id = ?',
+      [shopId],
     );
     return (result.first.values.first as num?)?.toDouble() ?? 0.0;
   }

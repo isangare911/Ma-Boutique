@@ -1,5 +1,6 @@
 class ShopSettings {
   final String id;
+  final String shopId; // ⚡ NOUVEAU
   final String shopName;
   final String? shopLogoPath;
   final String currency;
@@ -11,6 +12,7 @@ class ShopSettings {
 
   ShopSettings({
     required this.id,
+    required this.shopId, // ⚡ NOUVEAU
     required this.shopName,
     this.shopLogoPath,
     this.currency = 'FCFA',
@@ -20,8 +22,6 @@ class ShopSettings {
     this.ownerName,
     required this.updatedAt,
   });
-
-  static const String defaultId = 'SHOP-00001';
 
   /// Devises supportées
   static final List<Map<String, String>> availableCurrencies = [
@@ -36,16 +36,20 @@ class ShopSettings {
     {'code': 'CDF', 'label': 'Franc congolais (CDF)'},
   ];
 
-  /// Paramètres par défaut
-  static ShopSettings get defaults => ShopSettings(
-        id: defaultId,
-        shopName: 'Ma Boutique',
-        currency: 'FCFA',
-        updatedAt: DateTime.now(),
-      );
+  /// ⚡ Paramètres par défaut pour un shop spécifique
+  static ShopSettings forShop(String shopId, {String? shopName}) {
+    return ShopSettings(
+      id: shopId, // ⚡ L'id EST le shopId (une seule ligne par shop)
+      shopId: shopId,
+      shopName: shopName ?? 'Ma Boutique',
+      currency: 'FCFA',
+      updatedAt: DateTime.now(),
+    );
+  }
 
   ShopSettings copyWith({
     String? id,
+    String? shopId,
     String? shopName,
     String? shopLogoPath,
     String? currency,
@@ -57,6 +61,7 @@ class ShopSettings {
   }) {
     return ShopSettings(
       id: id ?? this.id,
+      shopId: shopId ?? this.shopId,
       shopName: shopName ?? this.shopName,
       shopLogoPath: shopLogoPath ?? this.shopLogoPath,
       currency: currency ?? this.currency,

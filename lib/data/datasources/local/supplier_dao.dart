@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:sqflite/sqflite.dart';
 
+import '../../../core/services/current_shop.dart';
 import '../../../core/services/sync_service.dart';
 import '../../models/supplier.dart';
 import '../../models/supplier_transaction.dart';
@@ -9,6 +10,8 @@ import 'database_helper.dart';
 
 class SupplierDao {
   final DatabaseHelper _dbHelper = DatabaseHelper.instance;
+
+  String? get _shopId => CurrentShop.shopId;
 
   // ═══════════════════════════════════════════════════════════
   // CRÉER
@@ -34,7 +37,7 @@ class SupplierDao {
       operationType: 'CREATE',
       entityType: 'SUPPLIER',
       entityId: supplier.id,
-      payload: _supplierToJson(supplier),
+      payload: _supplierToJson(supplier, shopId),
     );
 
     return supplier.id;
@@ -44,17 +47,28 @@ class SupplierDao {
   // LIRE
   // ═══════════════════════════════════════════════════════════
   Future<List<Supplier>> getAllSuppliers() async {
+    final shopId = _shopId;
+    if (shopId == null) return [];
+
     final db = await _dbHelper.database;
-    final result = await db.query('suppliers', orderBy: 'name ASC');
+    final result = await db.query(
+      'suppliers',
+      where: 'shop_id = ?',
+      whereArgs: [shopId],
+      orderBy: 'name ASC',
+    );
     return result.map((map) => _supplierFromMap(map)).toList();
   }
 
   Future<Supplier?> getSupplierById(String id) async {
+    final shopId = _shopId;
+    if (shopId == null) return null;
+
     final db = await _dbHelper.database;
     final result = await db.query(
       'suppliers',
-      where: 'id = ?',
-      whereArgs: [id],
+      where: 'id = ? AND shop_id = ?',
+      whereArgs: [id, shopId],
       limit: 1,
     );
     if (result.isEmpty) return null;
@@ -62,11 +76,14 @@ class SupplierDao {
   }
 
   Future<List<Supplier>> searchSuppliers(String query) async {
+    final shopId = _shopId;
+    if (shopId == null) return [];
+
     final db = await _dbHelper.database;
     final result = await db.query(
       'suppliers',
-      where: 'name LIKE ? OR phone LIKE ?',
-      whereArgs: ['%$query%', '%$query%'],
+      where: 'shop_id = ? AND (name LIKE ? OR phone LIKE ?)',
+      whereArgs: [shopId, '%$query%', '%$query%'],
       orderBy: 'name ASC',
     );
     return result.map((map) => _supplierFromMap(map)).toList();
@@ -86,15 +103,15 @@ class SupplierDao {
         'products_supplied': supplier.productsSupplied,
         'notes': supplier.notes,
       },
-      where: 'id = ?',
-      whereArgs: [supplier.id],
+      where: 'id = ? AND shop_id = ?',
+      whereArgs: [supplier.id, shopId],
     );
 
     await _addToSyncQueue(
       operationType: 'UPDATE',
       entityType: 'SUPPLIER',
       entityId: supplier.id,
-      payload: _supplierToJson(supplier),
+      payload: _supplierToJson(supplier, shopId),
     );
   }
 
@@ -102,23 +119,28 @@ class SupplierDao {
   // SUPPRIMER
   // ═══════════════════════════════════════════════════════════
   Future<void> deleteSupplier(String id) async {
+    final shopId = _shopId;
+    if (shopId == null) return;
+
     final db = await _dbHelper.database;
     await db.transaction((txn) async {
-      // Supprimer d'abord les transactions liées
       await txn.delete(
         'supplier_transactions',
         where: 'supplier_id = ?',
         whereArgs: [id],
       );
-      // Puis le fournisseur
-      await txn.delete('suppliers', where: 'id = ?', whereArgs: [id]);
+      await txn.delete(
+        'suppliers',
+        where: 'id = ? AND shop_id = ?',
+        whereArgs: [id, shopId],
+      );
     });
 
     await _addToSyncQueue(
       operationType: 'DELETE',
       entityType: 'SUPPLIER',
       entityId: id,
-      payload: {'id': id},
+      payload: {'id': id, 'shop_id': shopId},
     );
   }
 
@@ -126,6 +148,9 @@ class SupplierDao {
   // TRANSACTIONS
   // ═══════════════════════════════════════════════════════════
   Future<String> addTransaction(SupplierTransaction transaction) async {
+    final shopId = _shopId;
+    if (shopId == null) return transaction.id;
+
     final db = await _dbHelper.database;
     await db.insert(
       'supplier_transactions',
@@ -145,7 +170,7 @@ class SupplierDao {
       operationType: 'CREATE',
       entityType: 'SUPPLIER_TRANSACTION',
       entityId: transaction.id,
-      payload: _transactionToJson(transaction),
+      payload: _transactionToJson(transaction, shopId),
     );
 
     return transaction.id;
@@ -164,6 +189,9 @@ class SupplierDao {
   }
 
   Future<void> deleteTransaction(String id) async {
+    final shopId = _shopId;
+    if (shopId == null) return;
+
     final db = await _dbHelper.database;
     await db.delete(
       'supplier_transactions',
@@ -175,14 +203,13 @@ class SupplierDao {
       operationType: 'DELETE',
       entityType: 'SUPPLIER_TRANSACTION',
       entityId: id,
-      payload: {'id': id},
+      payload: {'id': id, 'shop_id': shopId},
     );
   }
 
   // ═══════════════════════════════════════════════════════════
   // CALCUL DU SOLDE
   // ═══════════════════════════════════════════════════════════
-  /// Calcule le solde dû à un fournisseur (positif = on lui doit)
   Future<double> getSupplierBalance(String supplierId) async {
     final db = await _dbHelper.database;
     final result = await db.rawQuery('''
@@ -198,19 +225,23 @@ class SupplierDao {
     return (result.first['balance'] as num?)?.toDouble() ?? 0.0;
   }
 
-  /// Récupère le solde pour plusieurs fournisseurs en une fois
   Future<Map<String, double>> getAllSuppliersBalances() async {
+    final shopId = _shopId;
+    if (shopId == null) return {};
+
     final db = await _dbHelper.database;
     final result = await db.rawQuery('''
       SELECT 
-        supplier_id,
+        st.supplier_id,
         SUM(CASE 
-          WHEN type = 'PAYMENT' THEN -amount
-          ELSE amount
+          WHEN st.type = 'PAYMENT' THEN -st.amount
+          ELSE st.amount
         END) as balance
-      FROM supplier_transactions
-      GROUP BY supplier_id
-    ''');
+      FROM supplier_transactions st
+      INNER JOIN suppliers s ON s.id = st.supplier_id
+      WHERE s.shop_id = ?
+      GROUP BY st.supplier_id
+    ''', [shopId]);
 
     final balances = <String, double>{};
     for (final row in result) {
@@ -224,20 +255,31 @@ class SupplierDao {
   // STATISTIQUES
   // ═══════════════════════════════════════════════════════════
   Future<int> getTotalSuppliers() async {
+    final shopId = _shopId;
+    if (shopId == null) return 0;
+
     final db = await _dbHelper.database;
-    final result = await db.rawQuery('SELECT COUNT(*) FROM suppliers');
+    final result = await db.rawQuery(
+      'SELECT COUNT(*) FROM suppliers WHERE shop_id = ?',
+      [shopId],
+    );
     return Sqflite.firstIntValue(result) ?? 0;
   }
 
   Future<double> getTotalDebt() async {
+    final shopId = _shopId;
+    if (shopId == null) return 0.0;
+
     final db = await _dbHelper.database;
     final result = await db.rawQuery('''
       SELECT SUM(CASE 
-        WHEN type = 'PAYMENT' THEN -amount
-        ELSE amount
+        WHEN st.type = 'PAYMENT' THEN -st.amount
+        ELSE st.amount
       END) as total
-      FROM supplier_transactions
-    ''');
+      FROM supplier_transactions st
+      INNER JOIN suppliers s ON s.id = st.supplier_id
+      WHERE s.shop_id = ?
+    ''', [shopId]);
     final total = (result.first['total'] as num?)?.toDouble() ?? 0.0;
     return total > 0 ? total : 0;
   }
@@ -269,9 +311,10 @@ class SupplierDao {
     );
   }
 
-  Map<String, dynamic> _supplierToJson(Supplier supplier) {
+  Map<String, dynamic> _supplierToJson(Supplier supplier, String shopId) {
     return {
       'id': supplier.id,
+      'shop_id': shopId,
       'name': supplier.name,
       'phone': supplier.phone,
       'address': supplier.address,
@@ -280,9 +323,11 @@ class SupplierDao {
     };
   }
 
-  Map<String, dynamic> _transactionToJson(SupplierTransaction t) {
+  Map<String, dynamic> _transactionToJson(
+      SupplierTransaction t, String shopId) {
     return {
       'id': t.id,
+      'shop_id': shopId,
       'supplier_id': t.supplierId,
       'type': t.type,
       'amount': t.amount,
@@ -306,7 +351,6 @@ class SupplierDao {
       'created_at': DateTime.now().toIso8601String(),
       'status': 'PENDING',
     });
-    // ⚡ Déclencher la sync automatique
     SyncService.instance.triggerSync();
   }
 }

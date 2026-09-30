@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../../../../core/permissions/permission_guard.dart';
 import '../../../../core/permissions/permissions.dart';
+import '../../../../core/services/auth_service.dart';
 import '../../../../core/services/data_refresh_notifier.dart';
 import '../../../../core/services/shop_settings_service.dart';
 import '../../../../core/theme/app_theme.dart';
@@ -83,8 +84,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
     }
   }
 
-  /// ⚡ Va à un onglet de la navigation principale, seulement s'il est visible
-  /// pour ce rôle. Sinon, on tombe sur l'onglet "Plus" (le dernier).
   void _goToTab(int index) {
     MainNavigationScreen.tabNotifier.value = index;
   }
@@ -134,11 +133,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final settings = ShopSettingsService.instance.settings;
-    final ownerName = settings.ownerName;
-    final shopName = settings.shopName;
+    // ⚡ Lire le nom de la boutique depuis le user connecté
+    final user = AuthService.instance.user;
+    final shopName = user?['shop']?['name'] as String? ?? 'Ma Boutique';
+
+    // ⚡ Fallback : si pas de user, prendre depuis ShopSettingsService
     final displayName =
-        (ownerName != null && ownerName.isNotEmpty) ? ownerName : shopName;
+        shopName.isNotEmpty ? shopName : ShopSettingsService.instance.shopName;
 
     return Container(
       color: AppColors.bg(context),
@@ -189,7 +190,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 ),
                 const SizedBox(height: 24),
 
-                // CARTE PRINCIPALE (CA) — visible pour tous, mais adaptée
+                // CARTE PRINCIPALE (CA)
                 Container(
                   width: double.infinity,
                   padding: const EdgeInsets.all(20),
@@ -232,7 +233,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
                             '$_todaySalesCount',
                           ),
                           const SizedBox(width: 24),
-                          // 🔒 Le bénéfice est sensible : visible si editSales ou viewReports
                           PermissionGuardAny(
                             permissions: [
                               Permission.editSales,
@@ -264,7 +264,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    // 🔒 Nouvelle vente : editSales
                     PermissionGuard(
                       permission: Permission.editSales,
                       child: QuickActionButton(
@@ -289,8 +288,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
                         },
                       ),
                     ),
-
-                    // 🔒 Stock : viewStock
                     PermissionGuard(
                       permission: Permission.viewStock,
                       child: QuickActionButton(
@@ -299,8 +296,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
                         onTap: () => _goToTab(2),
                       ),
                     ),
-
-                    // 🔒 Crédit : viewCredits
                     PermissionGuard(
                       permission: Permission.viewCredits,
                       child: QuickActionButton(
@@ -309,8 +304,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
                         onTap: () => _goToTab(3),
                       ),
                     ),
-
-                    // 🔒 Rapports : viewReports
                     PermissionGuard(
                       permission: Permission.viewReports,
                       child: QuickActionButton(
@@ -342,7 +335,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
                         color: AppColors.text(context),
                       ),
                     ),
-                    // 🔒 "Voir tout" pointe vers Stock → masqué si pas viewStock
                     PermissionGuard(
                       permission: Permission.viewStock,
                       child: TextButton(
@@ -367,7 +359,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     ),
                   )
                 else ...[
-                  // 🔒 Ruptures : pertinent seulement si viewStock
                   PermissionGuard(
                     permission: Permission.viewStock,
                     child: _outOfStockCount > 0
@@ -380,7 +371,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
                           )
                         : const SizedBox.shrink(),
                   ),
-                  // 🔒 Total produits : viewStock
                   PermissionGuard(
                     permission: Permission.viewStock,
                     child: AlertItem(

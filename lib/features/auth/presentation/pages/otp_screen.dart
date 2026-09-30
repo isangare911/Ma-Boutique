@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../../../../core/services/auth_service.dart';
+import '../../../../core/services/shop_settings_service.dart';
 import '../../../../core/services/subscription_service.dart';
 import '../../../../core/theme/app_theme.dart';
 import '../../../navigation/presentation/pages/main_navigation_screen.dart';
@@ -161,6 +162,7 @@ class _OtpScreenState extends State<OtpScreen> {
           await FirebaseAuth.instance.signInWithCredential(credential);
 
       debugPrint('✓ Firebase auth OK');
+      await ShopSettingsService.instance.reload();
 
       await AuthService.instance.markDeviceAsVerified(widget.phoneNumber);
 

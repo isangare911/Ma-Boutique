@@ -36,6 +36,9 @@ class _SplashScreenState extends State<SplashScreen> {
 
     // ⚡ 1. Utilisateur connecté
     if (AuthService.instance.isAuthenticated) {
+      // ⚡ Recharger les settings de la boutique connectée
+      await ShopSettingsService.instance.reload();
+
       final user = AuthService.instance.user;
       final mustChange = user?['must_change_password'] == true;
       final subStatus = user?['shop']?['subscription_status'];

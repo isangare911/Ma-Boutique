@@ -5,6 +5,7 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../network/api_client.dart';
+import 'current_shop.dart';
 
 class AuthService extends ChangeNotifier {
   static final AuthService instance = AuthService._();
@@ -47,7 +48,6 @@ class AuthService extends ChangeNotifier {
       _accessToken = await _secureStorage.read(key: _keyAccessToken);
       _refreshToken = await _secureStorage.read(key: _keyRefreshToken);
 
-      // ⚡ Recharger le user depuis SharedPreferences
       final prefs = await SharedPreferences.getInstance();
       final userJson = prefs.getString(_keyUser);
 
@@ -67,6 +67,11 @@ class AuthService extends ChangeNotifier {
 
       if (_isAuthenticated) {
         _apiClient.setAuthToken(_accessToken!);
+
+        // ⚡ Définir le shop courant
+        final shopId = _user?['shop']?['id'] as String?;
+        CurrentShop.set(shopId);
+        debugPrint('🔍 initialize → CurrentShop.shopId = $shopId');
       }
     } catch (e) {
       debugPrint('Erreur initialize auth');
@@ -74,6 +79,7 @@ class AuthService extends ChangeNotifier {
       _refreshToken = null;
       _user = null;
       _isAuthenticated = false;
+      CurrentShop.clear();
     }
 
     notifyListeners();
@@ -104,7 +110,7 @@ class AuthService extends ChangeNotifier {
         return true;
       }
 
-      debugPrint('Login échoué: ${response.error ?? "Identifiants invalides"}');
+      debugPrint('Login échoué');
       return false;
     } catch (e) {
       debugPrint('Erreur login');
@@ -170,7 +176,12 @@ class AuthService extends ChangeNotifier {
 
     _apiClient.setAuthToken(_accessToken!);
 
-    // ⚡ Écrire les tokens dans le stockage sécurisé
+    // ⚡ Définir le shop courant
+    final shopId = _user?['shop']?['id'] as String?;
+    CurrentShop.set(shopId);
+    debugPrint('🔍 _saveSession → CurrentShop.shopId = $shopId');
+
+    // Écrire les tokens dans le stockage sécurisé
     try {
       await _secureStorage.write(key: _keyAccessToken, value: _accessToken);
       await _secureStorage.write(key: _keyRefreshToken, value: _refreshToken);
@@ -178,7 +189,7 @@ class AuthService extends ChangeNotifier {
       debugPrint('Erreur écriture token sécurisé');
     }
 
-    // ⚡ Écrire le user dans SharedPreferences
+    // Écrire le user dans SharedPreferences
     if (_user != null) {
       try {
         final prefs = await SharedPreferences.getInstance();
@@ -197,6 +208,10 @@ class AuthService extends ChangeNotifier {
     _user = null;
     _isAuthenticated = false;
     _apiClient.clearAuthToken();
+
+    // ⚡ Effacer le shop courant
+    CurrentShop.clear();
+    debugPrint('🔍 logout → CurrentShop effacé');
 
     try {
       await _secureStorage.delete(key: _keyAccessToken);
@@ -228,7 +243,6 @@ class AuthService extends ChangeNotifier {
     final prefs = await SharedPreferences.getInstance();
     final verified = prefs.getBool(_keyDeviceVerified) ?? false;
     final savedPhone = prefs.getString(_keyVerifiedPhone);
-
     return verified && savedPhone == phone;
   }
 
@@ -272,11 +286,13 @@ class AuthService extends ChangeNotifier {
       if (response.success && response.body != null) {
         final data = response.body as Map<String, dynamic>;
 
-        // ⚡ Mettre à jour le user local (must_change_password → false)
         if (data['user'] != null) {
           _user = data['user'] as Map<String, dynamic>;
 
-          // Persister dans SharedPreferences
+          // ⚡ Mettre à jour le shop courant
+          final shopId = _user?['shop']?['id'] as String?;
+          CurrentShop.set(shopId);
+
           final prefs = await SharedPreferences.getInstance();
           await prefs.setString(_keyUser, jsonEncode(_user));
         }
@@ -285,7 +301,6 @@ class AuthService extends ChangeNotifier {
         return {'success': true};
       }
 
-      // ⚡ Extraire l'erreur du backend
       String errorMessage = 'Erreur lors du changement';
       if (response.body is Map && response.body['error'] != null) {
         errorMessage = response.body['error'] as String;

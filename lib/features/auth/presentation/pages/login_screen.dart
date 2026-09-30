@@ -2,8 +2,11 @@ import 'package:boutique/features/navigation/presentation/pages/main_navigation_
 import 'package:flutter/material.dart';
 
 import '../../../../core/services/auth_service.dart';
+import '../../../../core/services/shop_settings_service.dart';
 import '../../../../core/services/subscription_service.dart';
 import '../../../../core/theme/app_theme.dart';
+import '../../../subscription/presentation/pages/pending_approval_screen.dart';
+import '../../../subscription/presentation/pages/subscription_screen.dart';
 import '../widgets/custom_text_field.dart';
 import 'change_password_screen.dart';
 import 'register_screen.dart';
@@ -40,15 +43,17 @@ class _LoginScreenState extends State<LoginScreen> {
     if (!mounted) return;
 
     if (success) {
-      // ⚡ Charger l'abonnement après le login
+      // ⚡ Recharger les settings de la nouvelle boutique
+      await ShopSettingsService.instance.reload();
       await SubscriptionService.instance.refreshSubscription();
 
       if (!mounted) return;
 
-      // ⚡ Vérifier si l'utilisateur doit changer son mot de passe
       final user = AuthService.instance.user;
       final mustChange = user?['must_change_password'] == true;
+      final subStatus = user?['shop']?['subscription_status'];
 
+      // ⚡ 1. Force le changement de mot de passe
       if (mustChange) {
         Navigator.of(context).pushAndRemoveUntil(
           MaterialPageRoute(
@@ -59,13 +64,34 @@ class _LoginScreenState extends State<LoginScreen> {
         return;
       }
 
-      // ✅ Succès → dashboard
+      // ⚡ 2. Statut PENDING_VALIDATION → écran d'attente
+      if (subStatus == 'PENDING_VALIDATION') {
+        Navigator.of(context).pushAndRemoveUntil(
+          MaterialPageRoute(
+            builder: (_) => const PendingApprovalScreen(),
+          ),
+          (route) => false,
+        );
+        return;
+      }
+
+      // ⚡ 3. Statut CANCELLED ou EXPIRED → écran abonnement
+      if (subStatus == 'CANCELLED' || subStatus == 'EXPIRED') {
+        Navigator.of(context).pushAndRemoveUntil(
+          MaterialPageRoute(
+            builder: (_) => const SubscriptionScreen(),
+          ),
+          (route) => false,
+        );
+        return;
+      }
+
+      // ⚡ 4. Sinon → Dashboard
       Navigator.of(context).pushAndRemoveUntil(
         MaterialPageRoute(builder: (_) => const MainNavigationScreen()),
         (route) => false,
       );
     } else {
-      // ❌ Échec
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: const Text(

@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:sqflite/sqflite.dart';
 
+import '../../../core/services/current_shop.dart';
 import '../../../core/services/sync_service.dart';
 import '../../models/sale.dart';
 import '../../models/sale_item.dart';
@@ -10,14 +11,15 @@ import 'database_helper.dart';
 class SaleDao {
   final DatabaseHelper _dbHelper = DatabaseHelper.instance;
 
+  String? get _shopId => CurrentShop.shopId;
+
   // ═══════════════════════════════════════════════════════════
-  // ENREGISTRER UNE VENTE (avec décrémentation du stock)
+  // ENREGISTRER UNE VENTE
   // ═══════════════════════════════════════════════════════════
   Future<String> insertSale(Sale sale, String shopId) async {
     final db = await _dbHelper.database;
 
     await db.transaction((txn) async {
-      // 1. Insérer la vente
       await txn.insert('sales', {
         'id': sale.id,
         'shop_id': shopId,
@@ -28,7 +30,6 @@ class SaleDao {
         'created_at': sale.createdAt.toIso8601String(),
       });
 
-      // 2. Insérer les articles + décrémenter le stock
       for (final item in sale.items) {
         await txn.insert('sale_items', {
           'id': item.id,
@@ -42,12 +43,11 @@ class SaleDao {
         });
 
         await txn.rawUpdate(
-          'UPDATE products SET quantity = MAX(0, quantity - ?) WHERE id = ?',
-          [item.quantity, item.productId],
+          'UPDATE products SET quantity = MAX(0, quantity - ?) WHERE id = ? AND shop_id = ?',
+          [item.quantity, item.productId, shopId],
         );
       }
 
-      // 3. Ajouter à la file de synchronisation
       await txn.insert('sync_queue', {
         'operation_type': 'CREATE',
         'entity_type': 'SALE',
@@ -58,22 +58,31 @@ class SaleDao {
       });
     });
 
-    // ⚡ Déclencher la sync automatique
     SyncService.instance.triggerSync();
-
     return sale.id;
   }
 
   // ═══════════════════════════════════════════════════════════
-  // LIRE LES VENTES
+  // LIRE
   // ═══════════════════════════════════════════════════════════
   Future<List<Sale>> getAllSales() async {
+    final shopId = _shopId;
+    if (shopId == null) return [];
+
     final db = await _dbHelper.database;
-    final result = await db.query('sales', orderBy: 'created_at DESC');
+    final result = await db.query(
+      'sales',
+      where: 'shop_id = ?',
+      whereArgs: [shopId],
+      orderBy: 'created_at DESC',
+    );
     return result.map((map) => _saleFromMap(map)).toList();
   }
 
   Future<List<Sale>> getTodaySales() async {
+    final shopId = _shopId;
+    if (shopId == null) return [];
+
     final db = await _dbHelper.database;
     final now = DateTime.now();
     final startOfDay = DateTime(now.year, now.month, now.day).toIso8601String();
@@ -82,19 +91,22 @@ class SaleDao {
 
     final result = await db.query(
       'sales',
-      where: 'created_at BETWEEN ? AND ?',
-      whereArgs: [startOfDay, endOfDay],
+      where: 'shop_id = ? AND created_at BETWEEN ? AND ?',
+      whereArgs: [shopId, startOfDay, endOfDay],
       orderBy: 'created_at DESC',
     );
     return result.map((map) => _saleFromMap(map)).toList();
   }
 
   Future<Sale?> getSaleById(String id) async {
+    final shopId = _shopId;
+    if (shopId == null) return null;
+
     final db = await _dbHelper.database;
     final result = await db.query(
       'sales',
-      where: 'id = ?',
-      whereArgs: [id],
+      where: 'id = ? AND shop_id = ?',
+      whereArgs: [id, shopId],
       limit: 1,
     );
     if (result.isEmpty) return null;
@@ -125,9 +137,12 @@ class SaleDao {
   }
 
   // ═══════════════════════════════════════════════════════════
-  // STATISTIQUES DE BASE
+  // STATISTIQUES
   // ═══════════════════════════════════════════════════════════
   Future<double> getTodayRevenue() async {
+    final shopId = _shopId;
+    if (shopId == null) return 0.0;
+
     final db = await _dbHelper.database;
     final now = DateTime.now();
     final startOfDay = DateTime(now.year, now.month, now.day).toIso8601String();
@@ -135,13 +150,16 @@ class SaleDao {
         DateTime(now.year, now.month, now.day, 23, 59, 59).toIso8601String();
 
     final result = await db.rawQuery(
-      "SELECT SUM(total_amount) FROM sales WHERE created_at BETWEEN ? AND ? AND status = 'COMPLETED'",
-      [startOfDay, endOfDay],
+      "SELECT SUM(total_amount) FROM sales WHERE shop_id = ? AND created_at BETWEEN ? AND ? AND status = 'COMPLETED'",
+      [shopId, startOfDay, endOfDay],
     );
     return (result.first.values.first as num?)?.toDouble() ?? 0.0;
   }
 
   Future<int> getTodaySalesCount() async {
+    final shopId = _shopId;
+    if (shopId == null) return 0;
+
     final db = await _dbHelper.database;
     final now = DateTime.now();
     final startOfDay = DateTime(now.year, now.month, now.day).toIso8601String();
@@ -149,13 +167,16 @@ class SaleDao {
         DateTime(now.year, now.month, now.day, 23, 59, 59).toIso8601String();
 
     final result = await db.rawQuery(
-      "SELECT COUNT(*) FROM sales WHERE created_at BETWEEN ? AND ? AND status = 'COMPLETED'",
-      [startOfDay, endOfDay],
+      "SELECT COUNT(*) FROM sales WHERE shop_id = ? AND created_at BETWEEN ? AND ? AND status = 'COMPLETED'",
+      [shopId, startOfDay, endOfDay],
     );
     return Sqflite.firstIntValue(result) ?? 0;
   }
 
   Future<double> getTodayProfit() async {
+    final shopId = _shopId;
+    if (shopId == null) return 0.0;
+
     final db = await _dbHelper.database;
     final now = DateTime.now();
     final startOfDay = DateTime(now.year, now.month, now.day).toIso8601String();
@@ -166,8 +187,8 @@ class SaleDao {
       SELECT SUM((si.unit_price - si.purchase_price) * si.quantity)
       FROM sale_items si
       INNER JOIN sales s ON s.id = si.sale_id
-      WHERE s.created_at BETWEEN ? AND ? AND s.status = 'COMPLETED'
-    ''', [startOfDay, endOfDay]);
+      WHERE s.shop_id = ? AND s.created_at BETWEEN ? AND ? AND s.status = 'COMPLETED'
+    ''', [shopId, startOfDay, endOfDay]);
 
     return (result.first.values.first as num?)?.toDouble() ?? 0.0;
   }
@@ -176,51 +197,56 @@ class SaleDao {
   // ANNULER UNE VENTE
   // ═══════════════════════════════════════════════════════════
   Future<void> cancelSale(String saleId) async {
+    final shopId = _shopId;
+    if (shopId == null) return;
+
     final db = await _dbHelper.database;
 
     await db.transaction((txn) async {
-      // Récupérer les items pour restaurer le stock
       final items = await txn.query(
         'sale_items',
         where: 'sale_id = ?',
         whereArgs: [saleId],
       );
 
-      // Restaurer le stock
       for (final item in items) {
         await txn.rawUpdate(
-          'UPDATE products SET quantity = quantity + ? WHERE id = ?',
-          [item['quantity'], item['product_id']],
+          'UPDATE products SET quantity = quantity + ? WHERE id = ? AND shop_id = ?',
+          [item['quantity'], item['product_id'], shopId],
         );
       }
 
-      // Marquer la vente comme annulée
       await txn.update(
         'sales',
         {'status': 'CANCELLED'},
-        where: 'id = ?',
-        whereArgs: [saleId],
+        where: 'id = ? AND shop_id = ?',
+        whereArgs: [saleId, shopId],
       );
 
-      // Ajouter à la file de synchronisation
       await txn.insert('sync_queue', {
         'operation_type': 'UPDATE',
         'entity_type': 'SALE',
         'entity_id': saleId,
-        'payload': jsonEncode({'id': saleId, 'status': 'CANCELLED'}),
+        'payload': jsonEncode({
+          'id': saleId,
+          'shop_id': shopId,
+          'status': 'CANCELLED',
+        }),
         'created_at': DateTime.now().toIso8601String(),
         'status': 'PENDING',
       });
     });
 
-    // ⚡ Déclencher la sync automatique
     SyncService.instance.triggerSync();
   }
 
   // ═══════════════════════════════════════════════════════════
-  // STATISTIQUES AVANCÉES POUR LES RAPPORTS
+  // STATISTIQUES AVANCÉES
   // ═══════════════════════════════════════════════════════════
   Future<List<Map<String, dynamic>>> getRevenueByDay(int days) async {
+    final shopId = _shopId;
+    if (shopId == null) return [];
+
     final db = await _dbHelper.database;
     final now = DateTime.now();
     final results = <Map<String, dynamic>>[];
@@ -235,8 +261,8 @@ class SaleDao {
       final result = await db.rawQuery('''
         SELECT SUM(total_amount) as revenue, COUNT(*) as count
         FROM sales
-        WHERE created_at BETWEEN ? AND ? AND status = 'COMPLETED'
-      ''', [startOfDay, endOfDay]);
+        WHERE shop_id = ? AND created_at BETWEEN ? AND ? AND status = 'COMPLETED'
+      ''', [shopId, startOfDay, endOfDay]);
 
       results.add({
         'date': day,
@@ -249,6 +275,9 @@ class SaleDao {
   }
 
   Future<List<Map<String, dynamic>>> getTopProducts(int limit) async {
+    final shopId = _shopId;
+    if (shopId == null) return [];
+
     final db = await _dbHelper.database;
     final result = await db.rawQuery('''
       SELECT 
@@ -257,11 +286,11 @@ class SaleDao {
         SUM(si.subtotal) as total_revenue
       FROM sale_items si
       INNER JOIN sales s ON s.id = si.sale_id
-      WHERE s.status = 'COMPLETED'
+      WHERE s.shop_id = ? AND s.status = 'COMPLETED'
       GROUP BY si.product_name
       ORDER BY total_quantity DESC
       LIMIT ?
-    ''', [limit]);
+    ''', [shopId, limit]);
 
     return result
         .map((row) => {
@@ -273,6 +302,9 @@ class SaleDao {
   }
 
   Future<List<Map<String, dynamic>>> getSalesByCategory() async {
+    final shopId = _shopId;
+    if (shopId == null) return [];
+
     final db = await _dbHelper.database;
     final result = await db.rawQuery('''
       SELECT 
@@ -281,10 +313,10 @@ class SaleDao {
       FROM sale_items si
       INNER JOIN sales s ON s.id = si.sale_id
       LEFT JOIN products p ON p.id = si.product_id
-      WHERE s.status = 'COMPLETED'
+      WHERE s.shop_id = ? AND s.status = 'COMPLETED'
       GROUP BY p.category
       ORDER BY total_revenue DESC
-    ''');
+    ''', [shopId]);
 
     return result
         .map((row) => {
@@ -295,6 +327,9 @@ class SaleDao {
   }
 
   Future<List<Map<String, dynamic>>> getSalesByPaymentMethod() async {
+    final shopId = _shopId;
+    if (shopId == null) return [];
+
     final db = await _dbHelper.database;
     final result = await db.rawQuery('''
       SELECT 
@@ -302,10 +337,10 @@ class SaleDao {
         SUM(total_amount) as total_amount,
         COUNT(*) as count
       FROM sales
-      WHERE status = 'COMPLETED'
+      WHERE shop_id = ? AND status = 'COMPLETED'
       GROUP BY payment_method
       ORDER BY total_amount DESC
-    ''');
+    ''', [shopId]);
 
     return result
         .map((row) => {
@@ -317,6 +352,9 @@ class SaleDao {
   }
 
   Future<double> getRevenueForPeriod(String period) async {
+    final shopId = _shopId;
+    if (shopId == null) return 0.0;
+
     final db = await _dbHelper.database;
     final now = DateTime.now();
     DateTime startDate;
@@ -337,8 +375,8 @@ class SaleDao {
 
     final result = await db.rawQuery('''
       SELECT SUM(total_amount) FROM sales
-      WHERE created_at >= ? AND status = 'COMPLETED'
-    ''', [startDate.toIso8601String()]);
+      WHERE shop_id = ? AND created_at >= ? AND status = 'COMPLETED'
+    ''', [shopId, startDate.toIso8601String()]);
 
     return (result.first.values.first as num?)?.toDouble() ?? 0.0;
   }

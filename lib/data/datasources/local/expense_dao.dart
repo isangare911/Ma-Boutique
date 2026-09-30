@@ -2,12 +2,15 @@ import 'dart:convert';
 
 import 'package:sqflite/sqflite.dart';
 
+import '../../../core/services/current_shop.dart';
 import '../../../core/services/sync_service.dart';
 import '../../models/expense.dart';
 import 'database_helper.dart';
 
 class ExpenseDao {
   final DatabaseHelper _dbHelper = DatabaseHelper.instance;
+
+  String? get _shopId => CurrentShop.shopId;
 
   // ═══════════════════════════════════════════════════════════
   // CRÉER
@@ -33,7 +36,7 @@ class ExpenseDao {
       operationType: 'CREATE',
       entityType: 'EXPENSE',
       entityId: expense.id,
-      payload: _expenseToJson(expense),
+      payload: _expenseToJson(expense, shopId),
     );
 
     return expense.id;
@@ -43,40 +46,57 @@ class ExpenseDao {
   // LIRE
   // ═══════════════════════════════════════════════════════════
   Future<List<Expense>> getAllExpenses() async {
+    final shopId = _shopId;
+    if (shopId == null) return [];
+
     final db = await _dbHelper.database;
-    final result = await db.query('expenses', orderBy: 'expense_date DESC');
+    final result = await db.query(
+      'expenses',
+      where: 'shop_id = ?',
+      whereArgs: [shopId],
+      orderBy: 'expense_date DESC',
+    );
     return result.map((map) => _expenseFromMap(map)).toList();
   }
 
   Future<List<Expense>> getExpensesByDateRange(
       DateTime start, DateTime end) async {
+    final shopId = _shopId;
+    if (shopId == null) return [];
+
     final db = await _dbHelper.database;
     final result = await db.query(
       'expenses',
-      where: 'expense_date BETWEEN ? AND ?',
-      whereArgs: [start.toIso8601String(), end.toIso8601String()],
+      where: 'shop_id = ? AND expense_date BETWEEN ? AND ?',
+      whereArgs: [shopId, start.toIso8601String(), end.toIso8601String()],
       orderBy: 'expense_date DESC',
     );
     return result.map((map) => _expenseFromMap(map)).toList();
   }
 
   Future<List<Expense>> getExpensesByCategory(String category) async {
+    final shopId = _shopId;
+    if (shopId == null) return [];
+
     final db = await _dbHelper.database;
     final result = await db.query(
       'expenses',
-      where: 'category = ?',
-      whereArgs: [category],
+      where: 'shop_id = ? AND category = ?',
+      whereArgs: [shopId, category],
       orderBy: 'expense_date DESC',
     );
     return result.map((map) => _expenseFromMap(map)).toList();
   }
 
   Future<Expense?> getExpenseById(String id) async {
+    final shopId = _shopId;
+    if (shopId == null) return null;
+
     final db = await _dbHelper.database;
     final result = await db.query(
       'expenses',
-      where: 'id = ?',
-      whereArgs: [id],
+      where: 'id = ? AND shop_id = ?',
+      whereArgs: [id, shopId],
       limit: 1,
     );
     if (result.isEmpty) return null;
@@ -97,15 +117,15 @@ class ExpenseDao {
         'description': expense.description,
         'expense_date': expense.expenseDate.toIso8601String(),
       },
-      where: 'id = ?',
-      whereArgs: [expense.id],
+      where: 'id = ? AND shop_id = ?',
+      whereArgs: [expense.id, shopId],
     );
 
     await _addToSyncQueue(
       operationType: 'UPDATE',
       entityType: 'EXPENSE',
       entityId: expense.id,
-      payload: _expenseToJson(expense),
+      payload: _expenseToJson(expense, shopId),
     );
   }
 
@@ -113,14 +133,21 @@ class ExpenseDao {
   // SUPPRIMER
   // ═══════════════════════════════════════════════════════════
   Future<void> deleteExpense(String id) async {
+    final shopId = _shopId;
+    if (shopId == null) return;
+
     final db = await _dbHelper.database;
-    await db.delete('expenses', where: 'id = ?', whereArgs: [id]);
+    await db.delete(
+      'expenses',
+      where: 'id = ? AND shop_id = ?',
+      whereArgs: [id, shopId],
+    );
 
     await _addToSyncQueue(
       operationType: 'DELETE',
       entityType: 'EXPENSE',
       entityId: id,
-      payload: {'id': id},
+      payload: {'id': id, 'shop_id': shopId},
     );
   }
 
@@ -128,6 +155,9 @@ class ExpenseDao {
   // STATISTIQUES
   // ═══════════════════════════════════════════════════════════
   Future<double> getTodayTotal() async {
+    final shopId = _shopId;
+    if (shopId == null) return 0.0;
+
     final db = await _dbHelper.database;
     final now = DateTime.now();
     final startOfDay = DateTime(now.year, now.month, now.day).toIso8601String();
@@ -135,49 +165,60 @@ class ExpenseDao {
         DateTime(now.year, now.month, now.day, 23, 59, 59).toIso8601String();
 
     final result = await db.rawQuery(
-      'SELECT SUM(amount) FROM expenses WHERE expense_date BETWEEN ? AND ?',
-      [startOfDay, endOfDay],
+      'SELECT SUM(amount) FROM expenses WHERE shop_id = ? AND expense_date BETWEEN ? AND ?',
+      [shopId, startOfDay, endOfDay],
     );
     return (result.first.values.first as num?)?.toDouble() ?? 0.0;
   }
 
   Future<double> getMonthTotal() async {
+    final shopId = _shopId;
+    if (shopId == null) return 0.0;
+
     final db = await _dbHelper.database;
     final now = DateTime.now();
     final startOfMonth = DateTime(now.year, now.month, 1).toIso8601String();
 
     final result = await db.rawQuery(
-      'SELECT SUM(amount) FROM expenses WHERE expense_date >= ?',
-      [startOfMonth],
+      'SELECT SUM(amount) FROM expenses WHERE shop_id = ? AND expense_date >= ?',
+      [shopId, startOfMonth],
     );
     return (result.first.values.first as num?)?.toDouble() ?? 0.0;
   }
 
   Future<double> getYearTotal() async {
+    final shopId = _shopId;
+    if (shopId == null) return 0.0;
+
     final db = await _dbHelper.database;
     final now = DateTime.now();
     final startOfYear = DateTime(now.year, 1, 1).toIso8601String();
 
     final result = await db.rawQuery(
-      'SELECT SUM(amount) FROM expenses WHERE expense_date >= ?',
-      [startOfYear],
+      'SELECT SUM(amount) FROM expenses WHERE shop_id = ? AND expense_date >= ?',
+      [shopId, startOfYear],
     );
     return (result.first.values.first as num?)?.toDouble() ?? 0.0;
   }
 
-  /// Total des dépenses groupées par catégorie
   Future<List<Map<String, dynamic>>> getTotalByCategory({
     DateTime? start,
     DateTime? end,
   }) async {
+    final shopId = _shopId;
+    if (shopId == null) return [];
+
     final db = await _dbHelper.database;
 
-    String whereClause = '';
-    List<dynamic> whereArgs = [];
+    String whereClause = 'WHERE shop_id = ?';
+    List<dynamic> whereArgs = [shopId];
 
     if (start != null && end != null) {
-      whereClause = 'WHERE expense_date BETWEEN ? AND ?';
-      whereArgs = [start.toIso8601String(), end.toIso8601String()];
+      whereClause += ' AND expense_date BETWEEN ? AND ?';
+      whereArgs.addAll([
+        start.toIso8601String(),
+        end.toIso8601String(),
+      ]);
     }
 
     final result = await db.rawQuery('''
@@ -211,9 +252,10 @@ class ExpenseDao {
     );
   }
 
-  Map<String, dynamic> _expenseToJson(Expense expense) {
+  Map<String, dynamic> _expenseToJson(Expense expense, String shopId) {
     return {
       'id': expense.id,
+      'shop_id': shopId,
       'amount': expense.amount,
       'category': expense.category,
       'description': expense.description,
@@ -236,7 +278,6 @@ class ExpenseDao {
       'created_at': DateTime.now().toIso8601String(),
       'status': 'PENDING',
     });
-    // ⚡ Déclencher la sync automatique
     SyncService.instance.triggerSync();
   }
 }

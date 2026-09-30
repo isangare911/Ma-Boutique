@@ -1,11 +1,10 @@
+import '../../core/services/current_shop.dart';
 import '../datasources/local/sale_dao.dart';
 import '../models/sale.dart';
+import '../models/sale_item.dart';
 
 class SaleRepository {
   final SaleDao _dao = SaleDao();
-  static const String _defaultShopId = 'SHOP-00001';
-
-  Future<String> addSale(Sale sale) => _dao.insertSale(sale, _defaultShopId);
 
   Future<List<Sale>> getAllSales() => _dao.getAllSales();
 
@@ -13,13 +12,23 @@ class SaleRepository {
 
   Future<Sale?> getSaleById(String id) => _dao.getSaleById(id);
 
+  Future<List<SaleItem>> getSaleItems(String saleId) =>
+      _dao.getSaleItems(saleId);
+
+  Future<String> addSale(Sale sale) {
+    final shopId = CurrentShop.shopId;
+    if (shopId == null) {
+      throw StateError('Aucun shop connecté');
+    }
+    return _dao.insertSale(sale, shopId);
+  }
+
   Future<void> cancelSale(String saleId) => _dao.cancelSale(saleId);
 
-  // Statistiques
   Future<double> getTodayRevenue() => _dao.getTodayRevenue();
   Future<int> getTodaySalesCount() => _dao.getTodaySalesCount();
   Future<double> getTodayProfit() => _dao.getTodayProfit();
-  // Statistiques avancées
+
   Future<List<Map<String, dynamic>>> getRevenueByDay(int days) =>
       _dao.getRevenueByDay(days);
 

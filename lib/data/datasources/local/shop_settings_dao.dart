@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:sqflite/sqflite.dart';
 
+import '../../../core/services/current_shop.dart';
 import '../../../core/services/sync_service.dart';
 import '../../models/shop_settings.dart';
 import 'database_helper.dart';
@@ -9,70 +10,83 @@ import 'database_helper.dart';
 class ShopSettingsDao {
   final DatabaseHelper _dbHelper = DatabaseHelper.instance;
 
+  String? get _shopId => CurrentShop.shopId;
+
+  // ═══════════════════════════════════════════════════════════
+  // LIRE
+  // ═══════════════════════════════════════════════════════════
   Future<ShopSettings?> getSettings() async {
+    final shopId = _shopId;
+    if (shopId == null) return null;
+
     final db = await _dbHelper.database;
     final result = await db.query(
       'shop_settings',
-      where: 'id = ?',
-      whereArgs: [ShopSettings.defaultId],
+      where: 'shop_id = ?',
+      whereArgs: [shopId],
       limit: 1,
     );
     if (result.isEmpty) return null;
     return _settingsFromMap(result.first);
   }
 
-  /// ⚡ Insérer les settings localement SANS sync
-  /// Utilisé uniquement pour initialiser les valeurs par défaut
+  // ═══════════════════════════════════════════════════════════
+  // INSÉRER LOCALEMENT (sans sync)
+  // ═══════════════════════════════════════════════════════════
   Future<void> insertLocalOnly(ShopSettings settings) async {
     final db = await _dbHelper.database;
-    final fixed = settings.copyWith(id: ShopSettings.defaultId);
 
     await db.insert(
       'shop_settings',
       {
-        'id': fixed.id,
-        'shop_name': fixed.shopName,
-        'shop_logo_path': fixed.shopLogoPath,
-        'currency': fixed.currency,
-        'address': fixed.address,
-        'phone': fixed.phone,
-        'email': fixed.email,
-        'owner_name': fixed.ownerName,
+        'id': settings.shopId, // ⚡ L'id = shopId
+        'shop_id': settings.shopId,
+        'shop_name': settings.shopName,
+        'shop_logo_path': settings.shopLogoPath,
+        'currency': settings.currency,
+        'address': settings.address,
+        'phone': settings.phone,
+        'email': settings.email,
+        'owner_name': settings.ownerName,
         'updated_at': DateTime.now().toIso8601String(),
       },
       conflictAlgorithm: ConflictAlgorithm.replace,
     );
-    // ⚡ PAS d'appel à _addToSyncQueue (pas de sync pour les défauts)
   }
 
-  /// ⚡ Sauvegarder ET synchroniser
+  // ═══════════════════════════════════════════════════════════
+  // SAUVEGARDER + SYNCHRONISER
+  // ═══════════════════════════════════════════════════════════
   Future<void> saveSettings(ShopSettings settings) async {
-    // FORCER l'ID à SHOP-00001
-    final fixed = settings.copyWith(id: ShopSettings.defaultId);
-
     final db = await _dbHelper.database;
+
     await db.insert(
       'shop_settings',
       {
-        'id': fixed.id,
-        'shop_name': fixed.shopName,
-        'shop_logo_path': fixed.shopLogoPath,
-        'currency': fixed.currency,
-        'address': fixed.address,
-        'phone': fixed.phone,
-        'email': fixed.email,
-        'owner_name': fixed.ownerName,
+        'id': settings.shopId,
+        'shop_id': settings.shopId,
+        'shop_name': settings.shopName,
+        'shop_logo_path': settings.shopLogoPath,
+        'currency': settings.currency,
+        'address': settings.address,
+        'phone': settings.phone,
+        'email': settings.email,
+        'owner_name': settings.ownerName,
         'updated_at': DateTime.now().toIso8601String(),
       },
       conflictAlgorithm: ConflictAlgorithm.replace,
     );
 
-    await _addToSyncQueue(fixed);
+    await _addToSyncQueue(settings);
   }
 
+  // ═══════════════════════════════════════════════════════════
+  // HELPERS
+  // ═══════════════════════════════════════════════════════════
   ShopSettings _settingsFromMap(Map<String, dynamic> map) {
     return ShopSettings(
       id: map['id'] as String,
+      shopId: map['shop_id'] as String,
       shopName: map['shop_name'] as String,
       shopLogoPath: map['shop_logo_path'] as String?,
       currency: map['currency'] as String? ?? 'FCFA',
@@ -89,9 +103,10 @@ class ShopSettingsDao {
     await db.insert('sync_queue', {
       'operation_type': 'UPDATE',
       'entity_type': 'SHOP_SETTINGS',
-      'entity_id': ShopSettings.defaultId,
+      'entity_id': settings.shopId,
       'payload': jsonEncode({
-        'id': ShopSettings.defaultId,
+        'id': settings.shopId,
+        'shop_id': settings.shopId,
         'name': settings.shopName,
         'currency': settings.currency,
         'address': settings.address,
@@ -104,7 +119,6 @@ class ShopSettingsDao {
       'status': 'PENDING',
     });
 
-    // ⚡ Déclencher la sync automatique
     SyncService.instance.triggerSync();
   }
 }

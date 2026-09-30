@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../../../core/services/auth_service.dart';
-import '../../../../core/services/shop_settings_service.dart';
 import '../../../../core/theme/app_theme.dart';
 import '../../../auth/presentation/pages/login_screen.dart';
 
@@ -19,7 +18,7 @@ class _PendingApprovalScreenState extends State<PendingApprovalScreen> {
   Future<void> _checkStatus() async {
     setState(() => _isChecking = true);
 
-    // Rafraîchir le user pour voir si le statut a changé
+    // ⚡ Rafraîchir le user pour voir si le statut a changé
     await AuthService.instance.initialize();
 
     if (!mounted) return;
@@ -38,7 +37,11 @@ class _PendingApprovalScreenState extends State<PendingApprovalScreen> {
         ),
       );
 
-      // Retourner à l'écran de login pour se reconnecter proprement
+      // Déconnexion propre pour recharger le user
+      await AuthService.instance.logout();
+
+      if (!mounted) return;
+
       Navigator.of(context).pushAndRemoveUntil(
         MaterialPageRoute(builder: (_) => const LoginScreen()),
         (route) => false,
@@ -56,8 +59,8 @@ class _PendingApprovalScreenState extends State<PendingApprovalScreen> {
   }
 
   Future<void> _contactWhatsApp() async {
-    final shopName = ShopSettingsService.instance.shopName;
     final user = AuthService.instance.user;
+    final shopName = user?['shop']?['name'] as String? ?? 'ma boutique';
     final phone = user?['phone'] ?? '';
 
     final message = 'Bonjour, je suis $phone, propriétaire de "$shopName". '
@@ -117,8 +120,9 @@ class _PendingApprovalScreenState extends State<PendingApprovalScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final shopName = ShopSettingsService.instance.shopName;
+    // ⚡ Récupérer le nom de la boutique depuis le user connecté
     final user = AuthService.instance.user;
+    final shopName = user?['shop']?['name'] as String? ?? 'votre boutique';
     final phone = user?['phone'] ?? '';
 
     return Scaffold(

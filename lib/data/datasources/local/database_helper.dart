@@ -19,7 +19,7 @@ class DatabaseHelper {
 
     return await openDatabase(
       path,
-      version: 4,
+      version: 5,
       onCreate: _createDB,
       onUpgrade: _upgradeDB,
     );
@@ -202,10 +202,11 @@ class DatabaseHelper {
     )
     ''');
 
-    // Table Paramètres de la boutique
+    // ⚡ Table Paramètres de la boutique (v5 : avec shop_id)
     await db.execute('''
     CREATE TABLE shop_settings (
       id TEXT PRIMARY KEY,
+      shop_id TEXT NOT NULL,
       shop_name TEXT NOT NULL,
       shop_logo_path TEXT,
       currency TEXT DEFAULT 'FCFA',
@@ -216,6 +217,11 @@ class DatabaseHelper {
       updated_at TEXT NOT NULL
     )
     ''');
+
+    // ⚡ Index pour performance
+    await db.execute(
+      'CREATE INDEX idx_shop_settings_shop_id ON shop_settings(shop_id)',
+    );
   }
 
   Future _upgradeDB(Database db, int oldVersion, int newVersion) async {
@@ -273,6 +279,49 @@ class DatabaseHelper {
         updated_at TEXT NOT NULL
       )
       ''');
+    }
+
+    // ⚡ v5 : Ajouter shop_id dans shop_settings + recréer la table
+    if (oldVersion < 5) {
+      // 1. Renommer l'ancienne table
+      await db.execute('ALTER TABLE shop_settings RENAME TO shop_settings_old');
+
+      // 2. Créer la nouvelle table avec shop_id
+      await db.execute('''
+      CREATE TABLE shop_settings (
+        id TEXT PRIMARY KEY,
+        shop_id TEXT NOT NULL,
+        shop_name TEXT NOT NULL,
+        shop_logo_path TEXT,
+        currency TEXT DEFAULT 'FCFA',
+        address TEXT,
+        phone TEXT,
+        email TEXT,
+        owner_name TEXT,
+        updated_at TEXT NOT NULL
+      )
+      ''');
+
+      // 3. Migrer les anciennes données
+      // ⚡ On utilise 'SHOP-00001' comme fallback pour les anciennes données
+      await db.execute('''
+      INSERT INTO shop_settings (
+        id, shop_id, shop_name, shop_logo_path, currency,
+        address, phone, email, owner_name, updated_at
+      )
+      SELECT 
+        id, 'SHOP-00001', shop_name, shop_logo_path, currency,
+        address, phone, email, owner_name, updated_at
+      FROM shop_settings_old
+      ''');
+
+      // 4. Supprimer l'ancienne table
+      await db.execute('DROP TABLE shop_settings_old');
+
+      // 5. Créer l'index
+      await db.execute(
+        'CREATE INDEX idx_shop_settings_shop_id ON shop_settings(shop_id)',
+      );
     }
   }
 

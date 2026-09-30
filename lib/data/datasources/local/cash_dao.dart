@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:sqflite/sqflite.dart';
 
+import '../../../core/services/current_shop.dart';
 import '../../../core/services/sync_service.dart';
 import '../../models/cash_movement.dart';
 import '../../models/cash_session.dart';
@@ -9,6 +10,8 @@ import 'database_helper.dart';
 
 class CashDao {
   final DatabaseHelper _dbHelper = DatabaseHelper.instance;
+
+  String? get _shopId => CurrentShop.shopId;
 
   // ═══════════════════════════════════════════════════════════
   // SESSION DE CAISSE
@@ -29,6 +32,7 @@ class CashDao {
       entityId: session.id,
       payload: {
         'id': session.id,
+        'shop_id': shopId,
         'opening_balance': session.openingBalance,
         'opened_at': session.openedAt.toIso8601String(),
         'status': 'OPEN',
@@ -39,11 +43,14 @@ class CashDao {
   }
 
   Future<CashSession?> getCurrentSession() async {
+    final shopId = _shopId;
+    if (shopId == null) return null;
+
     final db = await _dbHelper.database;
     final result = await db.query(
       'cash_sessions',
-      where: 'status = ?',
-      whereArgs: ['OPEN'],
+      where: 'shop_id = ? AND status = ?',
+      whereArgs: [shopId, 'OPEN'],
       orderBy: 'opened_at DESC',
       limit: 1,
     );
@@ -52,16 +59,26 @@ class CashDao {
   }
 
   Future<List<CashSession>> getAllSessions() async {
+    final shopId = _shopId;
+    if (shopId == null) return [];
+
     final db = await _dbHelper.database;
-    final result = await db.query('cash_sessions', orderBy: 'opened_at DESC');
+    final result = await db.query(
+      'cash_sessions',
+      where: 'shop_id = ?',
+      whereArgs: [shopId],
+      orderBy: 'opened_at DESC',
+    );
     return result.map((map) => _sessionFromMap(map)).toList();
   }
 
   Future<void> closeSession(String sessionId, double closingBalance) async {
+    final shopId = _shopId;
+    if (shopId == null) return;
+
     final db = await _dbHelper.database;
 
     await db.transaction((txn) async {
-      // Récupérer le solde théorique
       final theoretical = await _calculateTheoreticalBalance(txn, sessionId);
       final difference = closingBalance - theoretical;
       final closedAt = DateTime.now().toIso8601String();
@@ -75,8 +92,8 @@ class CashDao {
           'closed_at': closedAt,
           'status': 'CLOSED',
         },
-        where: 'id = ?',
-        whereArgs: [sessionId],
+        where: 'id = ? AND shop_id = ?',
+        whereArgs: [sessionId, shopId],
       );
 
       await txn.insert('sync_queue', {
@@ -85,11 +102,12 @@ class CashDao {
         'entity_id': sessionId,
         'payload': jsonEncode({
           'id': sessionId,
+          'shop_id': shopId,
           'closing_balance': closingBalance,
           'theoretical_balance': theoretical,
           'difference': difference,
-          'closed_at': closedAt, // ⚡ Ajouté
-          'status': 'CLOSED', // ⚡ Ajouté
+          'closed_at': closedAt,
+          'status': 'CLOSED',
         }),
         'created_at': closedAt,
         'status': 'PENDING',
@@ -98,9 +116,12 @@ class CashDao {
   }
 
   // ═══════════════════════════════════════════════════════════
-  // MOUVEMENTS DE CAISSE
+  // MOUVEMENTS
   // ═══════════════════════════════════════════════════════════
   Future<String> addMovement(CashMovement movement) async {
+    final shopId = _shopId;
+    if (shopId == null) return movement.id;
+
     final db = await _dbHelper.database;
     await db.insert('cash_movements', {
       'id': movement.id,
@@ -118,12 +139,13 @@ class CashDao {
       entityId: movement.id,
       payload: {
         'id': movement.id,
+        'shop_id': shopId,
         'session_id': movement.sessionId,
         'type': movement.type,
         'amount': movement.amount,
         'category': movement.category,
-        'description': movement.description, // ⚡ Ajouté
-        'created_at': movement.createdAt.toIso8601String(), // ⚡ Ajouté
+        'description': movement.description,
+        'created_at': movement.createdAt.toIso8601String(),
       },
     );
 
@@ -142,15 +164,21 @@ class CashDao {
   }
 
   Future<void> deleteMovement(String id) async {
-    final db = await _dbHelper.database;
-    await db.delete('cash_movements', where: 'id = ?', whereArgs: [id]);
+    final shopId = _shopId;
+    if (shopId == null) return;
 
-    // ⚡ Ajout à la file de synchronisation
+    final db = await _dbHelper.database;
+    await db.delete(
+      'cash_movements',
+      where: 'id = ?',
+      whereArgs: [id],
+    );
+
     await _addToSyncQueue(
       operationType: 'DELETE',
       entityType: 'CASH_MOVEMENT',
       entityId: id,
-      payload: {'id': id},
+      payload: {'id': id, 'shop_id': shopId},
     );
   }
 
@@ -259,7 +287,6 @@ class CashDao {
       'created_at': DateTime.now().toIso8601String(),
       'status': 'PENDING',
     });
-    // ⚡ Déclencher la sync automatique
     SyncService.instance.triggerSync();
   }
 }
