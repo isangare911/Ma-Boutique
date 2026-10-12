@@ -39,7 +39,7 @@ class ShopSettingsDao {
     await db.insert(
       'shop_settings',
       {
-        'id': settings.shopId, // ⚡ L'id = shopId
+        'id': settings.shopId,
         'shop_id': settings.shopId,
         'shop_name': settings.shopName,
         'shop_logo_path': settings.shopLogoPath,
@@ -98,6 +98,7 @@ class ShopSettingsDao {
     );
   }
 
+  /// ⚡ Payload : NE PAS inclure shop_id (déduit du token).
   Future<void> _addToSyncQueue(ShopSettings settings) async {
     final db = await _dbHelper.database;
     await db.insert('sync_queue', {
@@ -105,8 +106,6 @@ class ShopSettingsDao {
       'entity_type': 'SHOP_SETTINGS',
       'entity_id': settings.shopId,
       'payload': jsonEncode({
-        'id': settings.shopId,
-        'shop_id': settings.shopId,
         'name': settings.shopName,
         'currency': settings.currency,
         'address': settings.address,

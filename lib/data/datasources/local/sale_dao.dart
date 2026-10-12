@@ -203,12 +203,24 @@ class SaleDao {
     final db = await _dbHelper.database;
 
     await db.transaction((txn) async {
+      // ⚡ Vérifier que la vente existe et n'est pas déjà annulée
+      final saleRows = await txn.query(
+        'sales',
+        columns: ['status'],
+        where: 'id = ? AND shop_id = ?',
+        whereArgs: [saleId, shopId],
+        limit: 1,
+      );
+      if (saleRows.isEmpty) return;
+      if (saleRows.first['status'] == 'CANCELLED') return;
+
       final items = await txn.query(
         'sale_items',
         where: 'sale_id = ?',
         whereArgs: [saleId],
       );
 
+      // ⚡ Restaurer le stock localement
       for (final item in items) {
         await txn.rawUpdate(
           'UPDATE products SET quantity = quantity + ? WHERE id = ? AND shop_id = ?',
@@ -223,14 +235,25 @@ class SaleDao {
         whereArgs: [saleId, shopId],
       );
 
+      // ⚡ Envoyer un UPDATE avec les items pour que le backend
+      // puisse restaurer le stock côté serveur.
       await txn.insert('sync_queue', {
         'operation_type': 'UPDATE',
         'entity_type': 'SALE',
         'entity_id': saleId,
         'payload': jsonEncode({
           'id': saleId,
-          'shop_id': shopId,
           'status': 'CANCELLED',
+          'items': items
+              .map((i) => {
+                    'id': i['id'],
+                    'product_id': i['product_id'],
+                    'product_name': i['product_name'],
+                    'unit_price': i['unit_price'],
+                    'purchase_price': i['purchase_price'],
+                    'quantity': i['quantity'],
+                  })
+              .toList(),
         }),
         'created_at': DateTime.now().toIso8601String(),
         'status': 'PENDING',
@@ -408,12 +431,13 @@ class SaleDao {
     );
   }
 
+  /// ⚡ Payload envoyé au backend. NE PAS inclure :
+  /// - shop_id : déduit du token côté serveur
+  /// - total_amount / total_profit : recalculés côté serveur
   Map<String, dynamic> _saleToJson(Sale sale, String shopId) {
     return {
       'id': sale.id,
-      'shop_id': shopId,
       'customer_id': sale.customerId,
-      'total_amount': sale.totalAmount,
       'payment_method': sale.paymentMethod,
       'status': sale.status,
       'created_at': sale.createdAt.toIso8601String(),

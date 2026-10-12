@@ -39,7 +39,7 @@ class CreditDao {
       operationType: 'CREATE',
       entityType: 'CREDIT',
       entityId: credit.id,
-      payload: _creditToJson(credit, shopId),
+      payload: _creditToJson(credit),
     );
 
     return credit.id;
@@ -119,6 +119,15 @@ class CreditDao {
         'comment': payment.comment,
       });
 
+      // ⚡ Recalculer paid_amount à partir de la somme des paiements
+      // (cohérent avec le backend qui fait pareil)
+      final sumResult = await txn.rawQuery(
+        'SELECT COALESCE(SUM(amount), 0) as total '
+        'FROM credit_payments WHERE credit_id = ?',
+        [payment.creditId],
+      );
+      final newPaid = (sumResult.first['total'] as num).toDouble();
+
       final creditResult = await txn.query(
         'credits',
         where: 'id = ? AND shop_id = ?',
@@ -127,11 +136,8 @@ class CreditDao {
       );
 
       if (creditResult.isNotEmpty) {
-        final currentPaid =
-            (creditResult.first['paid_amount'] as num).toDouble();
         final totalAmount =
             (creditResult.first['total_amount'] as num).toDouble();
-        final newPaid = currentPaid + payment.amount;
         final isFullyPaid = newPaid >= totalAmount;
 
         await txn.update(
@@ -144,6 +150,7 @@ class CreditDao {
           whereArgs: [payment.creditId, shopId],
         );
 
+        // ⚡ Payload : PAS de shop_id, PAS de paid_amount (recalculés serveur)
         await txn.insert('sync_queue', {
           'operation_type': 'CREATE',
           'entity_type': 'CREDIT_PAYMENT',
@@ -151,10 +158,10 @@ class CreditDao {
           'payload': jsonEncode({
             'id': payment.id,
             'credit_id': payment.creditId,
-            'shop_id': shopId,
             'amount': payment.amount,
             'payment_method': payment.paymentMethod,
             'date': payment.date.toIso8601String(),
+            'comment': payment.comment,
           }),
           'created_at': DateTime.now().toIso8601String(),
           'status': 'PENDING',
@@ -281,13 +288,14 @@ class CreditDao {
     );
   }
 
-  Map<String, dynamic> _creditToJson(Credit credit, String shopId) {
+  /// ⚡ Payload envoyé au backend. NE PAS inclure :
+  /// - shop_id : déduit du token côté serveur
+  /// - paid_amount / status : recalculés côté serveur
+  Map<String, dynamic> _creditToJson(Credit credit) {
     return {
       'id': credit.id,
-      'shop_id': shopId,
       'customer_id': credit.customer.id,
       'total_amount': credit.totalAmount,
-      'paid_amount': credit.paidAmount,
       'created_at': credit.createdAt.toIso8601String(),
       'due_date': credit.dueDate.toIso8601String(),
       'notes': credit.notes,

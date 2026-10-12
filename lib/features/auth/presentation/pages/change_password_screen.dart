@@ -28,12 +28,33 @@ class _ChangePasswordScreenState extends State<ChangePasswordScreen> {
   bool _isSaving = false;
   String? _errorMessage;
 
+  // ⚡ Minimum 8 caractères (aligné backend)
+  static const int _minPasswordLength = 8;
+
   @override
   void dispose() {
     _oldPasswordController.dispose();
     _newPasswordController.dispose();
     _confirmPasswordController.dispose();
     super.dispose();
+  }
+
+  /// ⚡ Validation locale alignée avec Django
+  String? _validatePassword(String? value) {
+    if (value == null || value.isEmpty) return 'Champ obligatoire';
+    if (value.length < _minPasswordLength) {
+      return 'Minimum $_minPasswordLength caractères';
+    }
+    if (!RegExp(r'[A-Z]').hasMatch(value)) {
+      return 'Doit contenir au moins une majuscule';
+    }
+    if (!RegExp(r'[a-z]').hasMatch(value)) {
+      return 'Doit contenir au moins une minuscule';
+    }
+    if (!RegExp(r'[0-9]').hasMatch(value)) {
+      return 'Doit contenir au moins un chiffre';
+    }
+    return null;
   }
 
   Future<void> _save() async {
@@ -59,10 +80,14 @@ class _ChangePasswordScreenState extends State<ChangePasswordScreen> {
         ),
       );
 
-      // ⚡ Recharger les settings après changement de mot de passe
-      await ShopSettingsService.instance.reload();
+      try {
+        await ShopSettingsService.instance.reload();
+      } catch (e) {
+        debugPrint('Erreur reload après changePassword: $e');
+      }
 
-      // ⚡ Si c'était forcé → aller au Dashboard
+      if (!mounted) return;
+
       if (widget.isForced) {
         Navigator.of(context).pushAndRemoveUntil(
           MaterialPageRoute(
@@ -173,7 +198,7 @@ class _ChangePasswordScreenState extends State<ChangePasswordScreen> {
                 obscureText: _obscureNew,
                 style: TextStyle(color: AppColors.text(context)),
                 decoration: _buildInputDecoration(
-                  hint: 'Minimum 6 caractères',
+                  hint: 'Minimum $_minPasswordLength caractères',
                   icon: Icons.lock_reset,
                   suffix: IconButton(
                     icon: Icon(
@@ -183,11 +208,15 @@ class _ChangePasswordScreenState extends State<ChangePasswordScreen> {
                     onPressed: () => setState(() => _obscureNew = !_obscureNew),
                   ),
                 ),
-                validator: (v) {
-                  if (v == null || v.isEmpty) return 'Champ obligatoire';
-                  if (v.length < 6) return 'Minimum 6 caractères';
-                  return null;
-                },
+                validator: _validatePassword,
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'Minimum $_minPasswordLength caractères, avec majuscule, minuscule et chiffre.',
+                style: TextStyle(
+                  fontSize: 12,
+                  color: AppColors.textSec(context),
+                ),
               ),
               const SizedBox(height: 20),
 

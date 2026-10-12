@@ -74,7 +74,7 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
       activeIcon: Icons.menu,
       label: 'Plus',
       screen: const MoreScreen(),
-      permission: Permission.viewDashboard, // toujours autorisé
+      permission: Permission.viewDashboard,
     ));
 
     return tabs;
@@ -83,6 +83,8 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
   @override
   void initState() {
     super.initState();
+    // ⚡ Initialiser _currentIndex depuis le tabNotifier (défini par SplashScreen)
+    _currentIndex = MainNavigationScreen.tabNotifier.value;
     MainNavigationScreen.tabNotifier.addListener(_onTabChanged);
   }
 
@@ -113,7 +115,6 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
   Widget build(BuildContext context) {
     final tabs = _buildTabs();
 
-    // Sécurité : si l'index courant dépasse le nombre d'onglets, revenir à 0
     if (_currentIndex >= tabs.length) {
       _currentIndex = 0;
     }
@@ -164,10 +165,6 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
     );
   }
 }
-
-// ═══════════════════════════════════════════════════════════
-// MODÈLE INTERNE
-// ═══════════════════════════════════════════════════════════
 
 class _NavTab {
   final IconData icon;

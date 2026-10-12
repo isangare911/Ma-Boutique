@@ -13,7 +13,6 @@ class SubscriptionService extends ChangeNotifier {
 
   final ApiClient _apiClient = ApiClient.instance;
 
-  // ⚡ Anti-manipulation de date
   static const String _keyCache = 'subscription_cache';
   static const String _keyLastCheck = 'last_server_check';
   static const String _keyDeviceTime = 'device_time_at_check';
@@ -55,7 +54,6 @@ class SubscriptionService extends ChangeNotifier {
         return;
       }
 
-      // ⚡ Essayer de décoder, avec gestion d'erreur locale
       try {
         final decoded = jsonDecode(cachedJson);
         if (decoded is! Map) {
@@ -67,7 +65,6 @@ class SubscriptionService extends ChangeNotifier {
         debugPrint('✓ Abonnement chargé du cache: ${_subscription!.status}');
         notifyListeners();
       } catch (e) {
-        // ⚡ Cache corrompu → on le supprime pour repartir propre
         debugPrint('⚠ Cache abonnement corrompu, suppression...');
         await prefs.remove(_keyCache);
         await prefs.remove(_keyLastCheck);
@@ -116,7 +113,8 @@ class SubscriptionService extends ChangeNotifier {
     }
   }
 
-  Future<bool> submitPaymentProof({
+  /// ⚡ Retourne {'success': bool, 'error': String?}
+  Future<Map<String, dynamic>> submitPaymentProof({
     required String paymentId,
     required String transactionId,
   }) async {
@@ -128,51 +126,26 @@ class SubscriptionService extends ChangeNotifier {
 
       if (response.success) {
         debugPrint('✓ Preuve soumise pour $paymentId');
-        return true;
+        return {'success': true};
       }
 
-      debugPrint('Erreur submitPaymentProof: ${response.error}');
-      return false;
-    } catch (e) {
-      debugPrint('Exception submitPaymentProof');
-      return false;
-    }
-  }
+      // ⚡ Récupérer le vrai message d'erreur du serveur
+      String errorMessage = 'Erreur lors de la soumission';
 
-  Future<Map<String, dynamic>?> confirmPayment({
-    required String paymentId,
-    required String transactionId,
-  }) async {
-    try {
-      final response = await _apiClient.post(
-        '/payments/$paymentId/confirm/',
-        {'transaction_id': transactionId},
-      );
-
-      if (response.success && response.body != null) {
-        final data = response.body as Map<String, dynamic>;
-
-        if (data['subscription'] != null) {
-          _subscription = Subscription.fromJson(
-            data['subscription'] as Map<String, dynamic>,
-          );
-          await _saveToCache(_subscription!);
-          notifyListeners();
-        }
-
-        return {
-          'payment': Payment.fromJson(
-            data['payment'] as Map<String, dynamic>,
-          ),
-          'message': data['message'] as String? ?? 'Paiement confirmé',
-        };
+      if (response.body is Map && response.body['error'] != null) {
+        errorMessage = response.body['error'] as String;
+      } else if (response.errorMessage != null) {
+        errorMessage = response.errorMessage!;
       }
 
-      debugPrint('Erreur confirmPayment: ${response.error}');
-      return null;
+      debugPrint('Erreur submitPaymentProof: $errorMessage');
+      return {'success': false, 'error': errorMessage};
     } catch (e) {
-      debugPrint('Exception confirmPayment');
-      return null;
+      debugPrint('Exception submitPaymentProof: $e');
+      return {
+        'success': false,
+        'error': 'Erreur de connexion au serveur',
+      };
     }
   }
 
@@ -262,14 +235,15 @@ class SubscriptionService extends ChangeNotifier {
       final deviceTimeAtCheck = DateTime.parse(deviceTimeAtCheckStr);
       final now = DateTime.now();
 
-      if (now.isBefore(lastCheck)) {
-        debugPrint('⚠ MANIPULATION DÉTECTÉE : date actuelle < date check');
+      const tolerance = Duration(days: 1);
+
+      if (now.isBefore(lastCheck.subtract(tolerance))) {
+        debugPrint('⚠ Date reculée significativement');
         return true;
       }
 
-      if (now.isBefore(deviceTimeAtCheck)) {
-        debugPrint(
-            '⚠ MANIPULATION DÉTECTÉE : date actuelle < device time at check');
+      if (now.isBefore(deviceTimeAtCheck.subtract(tolerance))) {
+        debugPrint('⚠ Date reculée significativement');
         return true;
       }
 
@@ -349,32 +323,6 @@ class SubscriptionService extends ChangeNotifier {
     } catch (e) {
       debugPrint('Erreur chargement plans');
       return [];
-    }
-  }
-
-  // ═══════════════════════════════════════════════════════════
-  // ACTIVER UN PLAN (admin/test)
-  // ═══════════════════════════════════════════════════════════
-
-  Future<bool> activatePlan(String planCode, {int days = 30}) async {
-    try {
-      final response = await _apiClient.post('/subscription/activate/', {
-        'plan': planCode,
-        'duration_days': days,
-      });
-
-      if (response.success && response.body != null) {
-        _subscription = Subscription.fromJson(
-          response.body as Map<String, dynamic>,
-        );
-        await _saveToCache(_subscription!);
-        notifyListeners();
-        return true;
-      }
-      return false;
-    } catch (e) {
-      debugPrint('Erreur activation');
-      return false;
     }
   }
 }

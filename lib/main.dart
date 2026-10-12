@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
+import 'package:sentry_flutter/sentry_flutter.dart';
 
 import 'core/services/auth_service.dart';
 import 'core/services/notification_cheker.dart';
@@ -14,9 +15,28 @@ import 'core/theme/app_theme.dart';
 import 'data/datasources/local/database_helper.dart';
 import 'features/auth/presentation/pages/splash_screen.dart';
 
-void main() async {
+// ═══════════════════════════════════════════════════════════
+// DSN SENTRY
+// ═══════════════════════════════════════════════════════════
+const String _sentryDsn =
+    'https://d09c90dc2609d70c8b27713915003dbe@o4512210549538816.ingest.de.sentry.io/4512210564284496';
+
+Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
+  // ⚡ Sentry (capture les erreurs)
+  await SentryFlutter.init(
+    (options) {
+      options.dsn = _sentryDsn;
+      options.tracesSampleRate = 0.1;
+      options.environment = 'production';
+      options.sendDefaultPii = false;
+    },
+    appRunner: () => _startApp(),
+  );
+}
+
+Future<void> _startApp() async {
   try {
     await Firebase.initializeApp();
     debugPrint('✓ Firebase initialisé');
@@ -26,20 +46,19 @@ void main() async {
 
   await DatabaseHelper.instance.database;
 
-  // ⚡ Plus de données de démo — chaque boutique démarre vide
-
+  await AuthService.instance.initialize();
   await ShopSettingsService.instance.initialize();
   await NotificationService.instance.initialize();
-  await AuthService.instance.initialize();
   await SyncService.instance.initialize();
   await ThemeService.instance.initialize();
   await SubscriptionService.instance.initializeFromCache();
 
-  NotificationChecker.instance.checkAll();
-
-  SubscriptionCheckerService.instance.start();
-
   runApp(const MaBoutiqueApp());
+
+  WidgetsBinding.instance.addPostFrameCallback((_) {
+    NotificationChecker.instance.checkAll();
+    SubscriptionCheckerService.instance.start();
+  });
 }
 
 class MaBoutiqueApp extends StatelessWidget {
@@ -81,17 +100,14 @@ class SubscriptionCheckerService {
   Future<void> _check() async {
     if (!AuthService.instance.isAuthenticated) return;
 
-    final manipulated = await SubscriptionService.instance.isDateManipulated();
-    if (manipulated) {
-      debugPrint('🚨 Manipulation détectée → déconnexion forcée');
-      await AuthService.instance.logout();
-      return;
-    }
-
-    final needsRefresh = await SubscriptionService.instance.needsRefresh();
-    if (needsRefresh) {
-      debugPrint('🔄 Refresh abonnement (> 24h)');
-      await SubscriptionService.instance.refreshSubscription();
+    try {
+      final needsRefresh = await SubscriptionService.instance.needsRefresh();
+      if (needsRefresh) {
+        debugPrint('🔄 Refresh abonnement');
+        await SubscriptionService.instance.refreshSubscription();
+      }
+    } catch (e) {
+      debugPrint('Erreur check abonnement');
     }
   }
 

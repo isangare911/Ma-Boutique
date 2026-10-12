@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import '../../../../core/services/auth_service.dart';
 import '../../../../core/services/shop_settings_service.dart';
 import '../../../../core/services/subscription_service.dart';
+import '../../../../core/services/sync_service.dart';
 import '../../../../core/theme/app_theme.dart';
 import '../../../subscription/presentation/pages/pending_approval_screen.dart';
 import '../../../subscription/presentation/pages/subscription_screen.dart';
@@ -35,72 +36,104 @@ class _LoginScreenState extends State<LoginScreen> {
     if (!_formKey.currentState!.validate()) return;
 
     final authService = AuthService.instance;
-    final success = await authService.login(
+    final result = await authService.login(
       phone: _phoneController.text.trim(),
       password: _passwordController.text,
     );
 
     if (!mounted) return;
 
-    if (success) {
-      // ⚡ Recharger les settings de la nouvelle boutique
+    if (!result.success) {
+      String message;
+      if (result.isThrottled) {
+        message = 'Trop de tentatives. Réessayez dans une minute.';
+      } else if (result.isNetworkError) {
+        message = 'Pas de connexion. Vérifiez votre réseau.';
+      } else {
+        message = result.error ?? 'Identifiants invalides.';
+      }
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(message),
+          backgroundColor: AppColors.dangerTheme(context),
+        ),
+      );
+      return;
+    }
+
+    // ⚡ Reloads non-bloquants
+    try {
       await ShopSettingsService.instance.reload();
       await SubscriptionService.instance.refreshSubscription();
+    } catch (e) {
+      debugPrint('Erreur reload après login: $e');
+    }
 
-      if (!mounted) return;
+    if (!mounted) return;
 
-      final user = AuthService.instance.user;
-      final mustChange = user?['must_change_password'] == true;
-      final subStatus = user?['shop']?['subscription_status'];
+    // ⚡ PULL : récupérer les données du serveur après login
+    try {
+      await SyncService.instance.pullAll();
+    } catch (e) {
+      debugPrint('⚠ Erreur pull après login: $e');
+    }
 
-      // ⚡ 1. Force le changement de mot de passe
-      if (mustChange) {
-        Navigator.of(context).pushAndRemoveUntil(
-          MaterialPageRoute(
-            builder: (_) => const ChangePasswordScreen(isForced: true),
-          ),
-          (route) => false,
-        );
-        return;
-      }
+    // ⚡ Recharger les settings après le pull
+    await ShopSettingsService.instance.reload();
 
-      // ⚡ 2. Statut PENDING_VALIDATION → écran d'attente
-      if (subStatus == 'PENDING_VALIDATION') {
-        Navigator.of(context).pushAndRemoveUntil(
-          MaterialPageRoute(
-            builder: (_) => const PendingApprovalScreen(),
-          ),
-          (route) => false,
-        );
-        return;
-      }
+    if (!mounted) return;
 
-      // ⚡ 3. Statut CANCELLED ou EXPIRED → écran abonnement
-      if (subStatus == 'CANCELLED' || subStatus == 'EXPIRED') {
-        Navigator.of(context).pushAndRemoveUntil(
-          MaterialPageRoute(
-            builder: (_) => const SubscriptionScreen(),
-          ),
-          (route) => false,
-        );
-        return;
-      }
+    // ⚡ 0. SUPERUSER → onglet "Plus" direct
+    final user = AuthService.instance.user;
+    final isSuperuser = user?['is_superuser'] == true;
+    debugPrint('🔍 Login - is_superuser: $isSuperuser');
 
-      // ⚡ 4. Sinon → Dashboard
+    if (isSuperuser) {
+      MainNavigationScreen.tabNotifier.value = 4;
       Navigator.of(context).pushAndRemoveUntil(
         MaterialPageRoute(builder: (_) => const MainNavigationScreen()),
         (route) => false,
       );
-    } else {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: const Text(
-            'Identifiants invalides. Vérifiez votre téléphone et mot de passe.',
-          ),
-          backgroundColor: AppColors.dangerTheme(context),
-        ),
-      );
+      return;
     }
+
+    // ⚡ 1. Force le changement de mot de passe
+    if (result.mustChangePassword) {
+      Navigator.of(context).pushAndRemoveUntil(
+        MaterialPageRoute(
+          builder: (_) => const ChangePasswordScreen(isForced: true),
+        ),
+        (route) => false,
+      );
+      return;
+    }
+
+    final subStatus = result.subscriptionStatus;
+
+    // ⚡ 2. PENDING_VALIDATION → écran d'attente
+    if (subStatus == 'PENDING_VALIDATION') {
+      Navigator.of(context).pushAndRemoveUntil(
+        MaterialPageRoute(builder: (_) => const PendingApprovalScreen()),
+        (route) => false,
+      );
+      return;
+    }
+
+    // ⚡ 3. CANCELLED ou EXPIRED → écran abonnement
+    if (subStatus == 'CANCELLED' || subStatus == 'EXPIRED') {
+      Navigator.of(context).pushAndRemoveUntil(
+        MaterialPageRoute(builder: (_) => const SubscriptionScreen()),
+        (route) => false,
+      );
+      return;
+    }
+
+    // ⚡ 4. Sinon → Dashboard
+    Navigator.of(context).pushAndRemoveUntil(
+      MaterialPageRoute(builder: (_) => const MainNavigationScreen()),
+      (route) => false,
+    );
   }
 
   @override
@@ -116,8 +149,6 @@ class _LoginScreenState extends State<LoginScreen> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 const SizedBox(height: 40),
-
-                // En-tête
                 Text(
                   'Bienvenue !',
                   style: TextStyle(
@@ -135,8 +166,6 @@ class _LoginScreenState extends State<LoginScreen> {
                   ),
                 ),
                 const SizedBox(height: 40),
-
-                // Champ Téléphone
                 CustomTextField(
                   label: 'Téléphone',
                   hint: '+223 70 12 34 56',
@@ -151,8 +180,6 @@ class _LoginScreenState extends State<LoginScreen> {
                   },
                 ),
                 const SizedBox(height: 20),
-
-                // Champ Mot de passe
                 CustomTextField(
                   label: 'Mot de passe',
                   hint: '••••••••',
@@ -179,23 +206,17 @@ class _LoginScreenState extends State<LoginScreen> {
                     return null;
                   },
                 ),
-
-                // Mot de passe oublié
                 Align(
                   alignment: Alignment.centerRight,
                   child: TextButton(
-                    onPressed: () {
-                      // TODO: Navigation vers Mot de passe oublié
-                    },
+                    onPressed: null,
                     child: Text(
                       'Mot de passe oublié ?',
-                      style: TextStyle(color: AppColors.green(context)),
+                      style: TextStyle(color: AppColors.textSec(context)),
                     ),
                   ),
                 ),
                 const SizedBox(height: 24),
-
-                // Bouton Se connecter
                 ListenableBuilder(
                   listenable: AuthService.instance,
                   builder: (context, _) {
@@ -216,46 +237,7 @@ class _LoginScreenState extends State<LoginScreen> {
                   },
                 ),
                 const SizedBox(height: 24),
-
-                // Séparateur
-                Row(
-                  children: [
-                    Expanded(
-                      child: Divider(color: AppColors.border(context)),
-                    ),
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 16),
-                      child: Text(
-                        'ou continuer avec',
-                        style: TextStyle(color: AppColors.textSec(context)),
-                      ),
-                    ),
-                    Expanded(
-                      child: Divider(color: AppColors.border(context)),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 24),
-
-                // Bouton Google
-                OutlinedButton.icon(
-                  onPressed: () {
-                    // TODO: Logique Google Sign-In
-                  },
-                  icon: const Icon(Icons.g_mobiledata, size: 30),
-                  label: const Text('Google'),
-                  style: OutlinedButton.styleFrom(
-                    minimumSize: const Size(double.infinity, 50),
-                    side: BorderSide(color: AppColors.border(context)),
-                    foregroundColor: AppColors.text(context),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 40),
-
-                // Lien vers Inscription
+                const SizedBox(height: 8),
                 Row(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [

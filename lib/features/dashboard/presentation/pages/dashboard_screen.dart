@@ -43,6 +43,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
     super.initState();
     DataRefreshNotifier.instance.addListener(_onDataChanged);
     ShopSettingsService.instance.addListener(_onSettingsChanged);
+    AuthService.instance.addListener(_onAuthChanged);
     _loadStats();
   }
 
@@ -50,6 +51,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
   void dispose() {
     DataRefreshNotifier.instance.removeListener(_onDataChanged);
     ShopSettingsService.instance.removeListener(_onSettingsChanged);
+    AuthService.instance.removeListener(_onAuthChanged);
     super.dispose();
   }
 
@@ -58,6 +60,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   void _onSettingsChanged() {
+    if (mounted) setState(() {});
+  }
+
+  void _onAuthChanged() {
     if (mounted) setState(() {});
   }
 
@@ -86,6 +92,25 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   void _goToTab(int index) {
     MainNavigationScreen.tabNotifier.value = index;
+  }
+
+  /// ⚡ Détermine le nom de la boutique à afficher
+  String _getDisplayName() {
+    // Priorité 1 : ShopSettingsService (chargé du cache local)
+    final localName = ShopSettingsService.instance.shopName;
+    if (localName.isNotEmpty && localName != 'Ma Boutique') {
+      return localName;
+    }
+
+    // Priorité 2 : données serveur dans AuthService.user
+    final user = AuthService.instance.user;
+    final serverName = user?['shop']?['name'] as String?;
+    if (serverName != null && serverName.isNotEmpty) {
+      return serverName;
+    }
+
+    // Fallback final
+    return 'Ma Boutique';
   }
 
   Widget _buildAvatar(BuildContext context) {
@@ -133,13 +158,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   @override
   Widget build(BuildContext context) {
-    // ⚡ Lire le nom de la boutique depuis le user connecté
-    final user = AuthService.instance.user;
-    final shopName = user?['shop']?['name'] as String? ?? 'Ma Boutique';
-
-    // ⚡ Fallback : si pas de user, prendre depuis ShopSettingsService
-    final displayName =
-        shopName.isNotEmpty ? shopName : ShopSettingsService.instance.shopName;
+    final displayName = _getDisplayName();
 
     return Container(
       color: AppColors.bg(context),
@@ -153,7 +172,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // ⚡ Bannière d'abonnement
                 const SubscriptionBanner(),
 
                 // EN-TÊTE

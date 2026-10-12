@@ -102,7 +102,7 @@ class RevenueByPlan {
       case 'BUSINESS':
         return 'Business';
       default:
-        return plan;
+        return plan.isEmpty ? 'Inconnu' : plan;
     }
   }
 }
@@ -137,7 +137,7 @@ class RevenueByMethod {
       case 'CASH':
         return 'Espèces';
       default:
-        return method;
+        return method.isEmpty ? 'Inconnu' : method;
     }
   }
 }
@@ -187,8 +187,8 @@ class AdminShop {
       ownerName: json['owner_name'] as String? ?? '—',
       phone: json['phone'] as String? ?? '—',
       currency: json['currency'] as String? ?? 'FCFA',
-      plan: json['plan'] as String,
-      status: json['status'] as String,
+      plan: json['plan'] as String? ?? '',
+      status: json['status'] as String? ?? '',
       daysRemaining: json['days_remaining'] as int? ?? 0,
       startDate: json['start_date'] != null
           ? DateTime.parse(json['start_date'] as String)
@@ -206,6 +206,7 @@ class AdminShop {
     );
   }
 
+  /// ⚡ Nom lisible du plan
   String get planName {
     switch (plan) {
       case 'TRIAL':
@@ -217,12 +218,15 @@ class AdminShop {
       case 'BUSINESS':
         return 'Business';
       default:
-        return plan;
+        return plan.isEmpty ? 'Aucun' : plan;
     }
   }
 
+  /// ⚡ Nom lisible du statut (traduit les codes backend)
   String get statusName {
     switch (status) {
+      case 'PENDING_VALIDATION':
+        return 'En attente';
       case 'TRIAL':
         return 'Essai';
       case 'ACTIVE':
@@ -231,8 +235,18 @@ class AdminShop {
         return 'Grâce';
       case 'EXPIRED':
         return 'Expiré';
+      case 'CANCELLED':
+        return 'Annulé';
       default:
-        return status;
+        return status.isEmpty ? 'Inconnu' : status;
     }
   }
+
+  /// ⚡ Helpers de statut (utilisés dans les widgets)
+  bool get isPending => status == 'PENDING_VALIDATION';
+  bool get isCancelled => status == 'CANCELLED';
+  bool get isExpired => status == 'EXPIRED';
+  bool get isActiveStatus => status == 'ACTIVE';
+  bool get isTrial => status == 'TRIAL';
+  bool get isGracePeriod => status == 'GRACE_PERIOD';
 }

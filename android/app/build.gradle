@@ -7,7 +7,7 @@ plugins {
 
 android {
     namespace = "com.example.boutique"
-    compileSdk = flutter.compileSdkVersion
+    compileSdk = 36
     // ⚡ AJOUT : forcer NDK 27 pour flutter_local_notifications
     ndkVersion = "27.0.12077973"
 

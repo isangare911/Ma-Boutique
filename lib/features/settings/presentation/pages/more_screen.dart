@@ -26,8 +26,7 @@ class MoreScreen extends StatelessWidget {
         title: const Text('Se déconnecter ?'),
         content: const Text(
           'Voulez-vous vraiment vous déconnecter ?\n\n'
-          'Vos données restent sauvegardées localement et sur le Cloud. '
-          'Vous n\'aurez pas besoin de refaire l\'OTP à la prochaine connexion.',
+          'Vos données restent sauvegardées localement et sur le Cloud.',
         ),
         actions: [
           TextButton(
@@ -97,9 +96,8 @@ class MoreScreen extends StatelessWidget {
           ),
 
           // ═══════════════════════════════════════════════════
-          // MENU PRINCIPAL (chaque item conditionné)
+          // MENU PRINCIPAL
           // ═══════════════════════════════════════════════════
-
           PermissionGuard(
             permission: Permission.viewUsers,
             child: _buildMenuItem(

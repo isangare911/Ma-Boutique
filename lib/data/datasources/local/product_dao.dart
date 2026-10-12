@@ -10,7 +10,6 @@ import 'database_helper.dart';
 class ProductDao {
   final DatabaseHelper _dbHelper = DatabaseHelper.instance;
 
-  /// ⚡ Récupère le shop_id courant, ou null si non connecté
   String? get _shopId => CurrentShop.shopId;
 
   // ═══════════════════════════════════════════════════════════
@@ -45,14 +44,14 @@ class ProductDao {
       operationType: 'CREATE',
       entityType: 'PRODUCT',
       entityId: product.id,
-      payload: _productToJson(product, shopId),
+      payload: _productToJson(product),
     );
 
     return product.id;
   }
 
   // ═══════════════════════════════════════════════════════════
-  // LIRE (filtré par shop_id)
+  // LIRE
   // ═══════════════════════════════════════════════════════════
   Future<List<Product>> getAllProducts() async {
     final shopId = _shopId;
@@ -156,63 +155,71 @@ class ProductDao {
       operationType: 'UPDATE',
       entityType: 'PRODUCT',
       entityId: product.id,
-      payload: _productToJson(product, shopId),
+      payload: _productToJson(product),
     );
   }
 
+  /// ⚡ Décrémente le stock de manière atomique (évite les race conditions).
   Future<void> decrementStock(String productId, int quantity) async {
+    if (quantity <= 0) return;
+
     final shopId = _shopId;
     if (shopId == null) return;
 
     final db = await _dbHelper.database;
+
+    // UPDATE atomique
+    await db.rawUpdate(
+      'UPDATE products SET quantity = MAX(0, quantity - ?), updated_at = ? '
+      'WHERE id = ? AND shop_id = ?',
+      [
+        quantity,
+        DateTime.now().toIso8601String(),
+        productId,
+        shopId,
+      ],
+    );
+
+    // Lire la nouvelle valeur pour le sync
     final product = await getProductById(productId);
     if (product == null) return;
-
-    final newQuantity = (product.quantity - quantity).clamp(0, 999999);
-
-    await db.update(
-      'products',
-      {
-        'quantity': newQuantity,
-        'updated_at': DateTime.now().toIso8601String(),
-      },
-      where: 'id = ? AND shop_id = ?',
-      whereArgs: [productId, shopId],
-    );
 
     await _addToSyncQueue(
       operationType: 'UPDATE',
       entityType: 'PRODUCT',
       entityId: productId,
-      payload: {'id': productId, 'shop_id': shopId, 'quantity': newQuantity},
+      payload: {'id': productId, 'quantity': product.quantity},
     );
   }
 
+  /// ⚡ Incrémente le stock de manière atomique.
   Future<void> incrementStock(String productId, int quantity) async {
+    if (quantity <= 0) return;
+
     final shopId = _shopId;
     if (shopId == null) return;
 
     final db = await _dbHelper.database;
+
+    await db.rawUpdate(
+      'UPDATE products SET quantity = quantity + ?, updated_at = ? '
+      'WHERE id = ? AND shop_id = ?',
+      [
+        quantity,
+        DateTime.now().toIso8601String(),
+        productId,
+        shopId,
+      ],
+    );
+
     final product = await getProductById(productId);
     if (product == null) return;
-
-    final newQuantity = product.quantity + quantity;
-
-    await db.update(
-      'products',
-      {
-        'quantity': newQuantity,
-        'updated_at': DateTime.now().toIso8601String(),
-      },
-      where: 'id = ? AND shop_id = ?',
-      whereArgs: [productId, shopId],
-    );
 
     await _addToSyncQueue(
       operationType: 'UPDATE',
       entityType: 'PRODUCT',
       entityId: productId,
-      payload: {'id': productId, 'shop_id': shopId, 'quantity': newQuantity},
+      payload: {'id': productId, 'quantity': product.quantity},
     );
   }
 
@@ -234,12 +241,12 @@ class ProductDao {
       operationType: 'DELETE',
       entityType: 'PRODUCT',
       entityId: id,
-      payload: {'id': id, 'shop_id': shopId},
+      payload: {'id': id},
     );
   }
 
   // ═══════════════════════════════════════════════════════════
-  // STATISTIQUES (filtré par shop_id)
+  // STATISTIQUES
   // ═══════════════════════════════════════════════════════════
   Future<int> getTotalProducts() async {
     final shopId = _shopId;
@@ -296,10 +303,10 @@ class ProductDao {
     );
   }
 
-  Map<String, dynamic> _productToJson(Product product, String shopId) {
+  /// ⚡ Payload : NE PAS inclure shop_id (déduit du token).
+  Map<String, dynamic> _productToJson(Product product) {
     return {
       'id': product.id,
-      'shop_id': shopId,
       'name': product.name,
       'reference': product.reference,
       'barcode': product.barcode,

@@ -6,6 +6,7 @@ import '../../../../core/constants/app_assets.dart';
 import '../../../../core/services/auth_service.dart';
 import '../../../../core/services/shop_settings_service.dart';
 import '../../../../core/services/subscription_service.dart';
+import '../../../../core/services/sync_service.dart';
 import '../../../../core/theme/app_theme.dart';
 import '../../../navigation/presentation/pages/main_navigation_screen.dart';
 import '../../../subscription/presentation/pages/pending_approval_screen.dart';
@@ -36,18 +37,39 @@ class _SplashScreenState extends State<SplashScreen> {
 
     // ⚡ 1. Utilisateur connecté
     if (AuthService.instance.isAuthenticated) {
-      // ⚡ Recharger les settings de la boutique connectée
       await ShopSettingsService.instance.reload();
 
       final user = AuthService.instance.user;
       final mustChange = user?['must_change_password'] == true;
+      final isSuperuser = user?['is_superuser'] == true;
       final subStatus = user?['shop']?['subscription_status'];
 
       await SubscriptionService.instance.refreshSubscription();
 
       if (!mounted) return;
 
-      // 2. Force le changement de mot de passe
+      // ⚡ PULL : récupérer les données du serveur
+      try {
+        await SyncService.instance.pullAll();
+      } catch (e) {
+        debugPrint('⚠ Erreur pull au démarrage: $e');
+      }
+
+      // ⚡ Recharger les settings après le pull (le nom peut avoir changé)
+      await ShopSettingsService.instance.reload();
+
+      if (!mounted) return;
+
+      // ⚡ 2. SUPERUSER → onglet "Plus" direct
+      if (isSuperuser) {
+        MainNavigationScreen.tabNotifier.value = 4;
+        Navigator.of(context).pushReplacement(
+          MaterialPageRoute(builder: (_) => const MainNavigationScreen()),
+        );
+        return;
+      }
+
+      // ⚡ 3. Force le changement de mot de passe
       if (mustChange) {
         Navigator.of(context).pushReplacement(
           MaterialPageRoute(
@@ -57,7 +79,7 @@ class _SplashScreenState extends State<SplashScreen> {
         return;
       }
 
-      // 3. Statut PENDING_VALIDATION → écran d'attente
+      // ⚡ 4. Statut PENDING_VALIDATION → écran d'attente
       if (subStatus == 'PENDING_VALIDATION') {
         Navigator.of(context).pushReplacement(
           MaterialPageRoute(
@@ -67,7 +89,7 @@ class _SplashScreenState extends State<SplashScreen> {
         return;
       }
 
-      // 4. Statut CANCELLED ou EXPIRED → écran abonnement
+      // ⚡ 5. Statut CANCELLED ou EXPIRED → écran abonnement
       if (subStatus == 'CANCELLED' || subStatus == 'EXPIRED') {
         Navigator.of(context).pushReplacement(
           MaterialPageRoute(
@@ -77,7 +99,7 @@ class _SplashScreenState extends State<SplashScreen> {
         return;
       }
 
-      // 5. Sinon → Dashboard
+      // ⚡ 6. Sinon → Dashboard
       Navigator.of(context).pushReplacement(
         MaterialPageRoute(builder: (_) => const MainNavigationScreen()),
       );
@@ -110,9 +132,7 @@ class _SplashScreenState extends State<SplashScreen> {
           Image.asset(
             AppAssets.splashBackground,
             fit: BoxFit.cover,
-            errorBuilder: (_, __, ___) => Container(
-              color: Colors.white,
-            ),
+            errorBuilder: (_, __, ___) => Container(color: Colors.white),
           ),
           SafeArea(
             child: Column(

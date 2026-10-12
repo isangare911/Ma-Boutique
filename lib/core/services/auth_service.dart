@@ -2,10 +2,45 @@ import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 
 import '../network/api_client.dart';
 import 'current_shop.dart';
+
+/// ⚡ Résultat typé du login (permet de distinguer throttling / réseau / identifiants)
+class LoginResult {
+  final bool success;
+  final String? error;
+  final int? statusCode;
+  final bool mustChangePassword;
+  final String? subscriptionStatus;
+
+  LoginResult({
+    required this.success,
+    this.error,
+    this.statusCode,
+    this.mustChangePassword = false,
+    this.subscriptionStatus,
+  });
+
+  bool get isThrottled => statusCode == 429;
+  bool get isNetworkError => statusCode == 0;
+}
+
+/// ⚡ Résultat typé de l'inscription
+class RegisterResult {
+  final bool success;
+  final String? error;
+  final int? statusCode;
+
+  RegisterResult({
+    required this.success,
+    this.error,
+    this.statusCode,
+  });
+
+  bool get isThrottled => statusCode == 429;
+  bool get isNetworkError => statusCode == 0;
+}
 
 class AuthService extends ChangeNotifier {
   static final AuthService instance = AuthService._();
@@ -33,6 +68,7 @@ class AuthService extends ChangeNotifier {
   Map<String, dynamic>? _user;
   bool _isAuthenticated = false;
   bool _isLoading = false;
+  bool _refreshing = false;
 
   String? get accessToken => _accessToken;
   Map<String, dynamic>? get user => _user;
@@ -48,17 +84,20 @@ class AuthService extends ChangeNotifier {
       _accessToken = await _secureStorage.read(key: _keyAccessToken);
       _refreshToken = await _secureStorage.read(key: _keyRefreshToken);
 
-      final prefs = await SharedPreferences.getInstance();
-      final userJson = prefs.getString(_keyUser);
+      // ⚡ Lire le user depuis le MÊME storage que celui utilisé pour l'écrire
+      final userJson = await _secureStorage.read(key: _keyUser);
 
       if (userJson != null) {
         try {
           final decoded = jsonDecode(userJson);
           if (decoded is Map) {
             _user = Map<String, dynamic>.from(decoded);
+            debugPrint('🔍 initialize → user rechargé: ${_user?['phone']} '
+                '(shop: ${_user?['shop']?['name']})');
           }
         } catch (e) {
-          await prefs.remove(_keyUser);
+          debugPrint('⚠ Erreur parsing user, suppression');
+          await _secureStorage.delete(key: _keyUser);
           _user = null;
         }
       }
@@ -68,7 +107,11 @@ class AuthService extends ChangeNotifier {
       if (_isAuthenticated) {
         _apiClient.setAuthToken(_accessToken!);
 
-        // ⚡ Définir le shop courant
+        // ⚡ Brancher le refresh automatique
+        _apiClient.onUnauthorized = () async {
+          return await refreshAccessToken();
+        };
+
         final shopId = _user?['shop']?['id'] as String?;
         CurrentShop.set(shopId);
         debugPrint('🔍 initialize → CurrentShop.shopId = $shopId');
@@ -89,7 +132,7 @@ class AuthService extends ChangeNotifier {
   // CONNEXION
   // ═══════════════════════════════════════════════════════════
 
-  Future<bool> login({
+  Future<LoginResult> login({
     required String phone,
     required String password,
   }) async {
@@ -99,6 +142,13 @@ class AuthService extends ChangeNotifier {
     try {
       _apiClient.clearAuthToken();
 
+      // ⚡ Vider l'ancien user AVANT le nouveau login
+      // (évite de mélanger les données entre 2 sessions)
+      _user = null;
+      _accessToken = null;
+      _refreshToken = null;
+      _isAuthenticated = false;
+
       final response = await _apiClient.post('/auth/login/', {
         'phone': phone,
         'password': password,
@@ -107,14 +157,29 @@ class AuthService extends ChangeNotifier {
       if (response.success && response.body != null) {
         final data = response.body as Map<String, dynamic>;
         await _saveSession(data);
-        return true;
+
+        final mustChange = _user?['must_change_password'] == true;
+        final subStatus = _user?['shop']?['subscription_status'] as String?;
+
+        return LoginResult(
+          success: true,
+          mustChangePassword: mustChange,
+          subscriptionStatus: subStatus,
+        );
       }
 
-      debugPrint('Login échoué');
-      return false;
+      return LoginResult(
+        success: false,
+        statusCode: response.statusCode,
+        error: response.errorMessage ?? 'Identifiants invalides',
+      );
     } catch (e) {
       debugPrint('Erreur login');
-      return false;
+      return LoginResult(
+        success: false,
+        statusCode: 0,
+        error: 'Erreur de connexion',
+      );
     } finally {
       _isLoading = false;
       notifyListeners();
@@ -125,7 +190,7 @@ class AuthService extends ChangeNotifier {
   // INSCRIPTION
   // ═══════════════════════════════════════════════════════════
 
-  Future<bool> register({
+  Future<RegisterResult> register({
     required String phone,
     required String password,
     required String shopName,
@@ -149,17 +214,83 @@ class AuthService extends ChangeNotifier {
       if (response.success && response.body != null) {
         final data = response.body as Map<String, dynamic>;
         await _saveSession(data);
-        return true;
+        return RegisterResult(success: true);
       }
 
-      debugPrint('Register échoué');
-      return false;
+      return RegisterResult(
+        success: false,
+        statusCode: response.statusCode,
+        error: response.errorMessage ?? 'Inscription échouée',
+      );
     } catch (e) {
       debugPrint('Erreur register');
-      return false;
+      return RegisterResult(
+        success: false,
+        statusCode: 0,
+        error: 'Erreur de connexion',
+      );
     } finally {
       _isLoading = false;
       notifyListeners();
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════
+  // REFRESH TOKEN
+  // ═══════════════════════════════════════════════════════════
+
+  /// ⚡ Rafraîchit l'access token via le refresh token.
+  /// Retourne le nouveau token ou null si échec (logout auto).
+  Future<String?> refreshAccessToken() async {
+    if (_refreshToken == null) return null;
+    if (_refreshing) return _accessToken;
+
+    _refreshing = true;
+
+    try {
+      final savedToken = _accessToken;
+      _apiClient.clearAuthToken();
+
+      final response = await _apiClient.post('/auth/token/refresh/', {
+        'refresh': _refreshToken,
+      });
+
+      if (response.success && response.body != null) {
+        final data = response.body as Map<String, dynamic>;
+        final newAccess = data['access'] as String?;
+        final newRefresh = data['refresh'] as String?;
+
+        if (newAccess == null) {
+          if (savedToken != null) _apiClient.setAuthToken(savedToken);
+          return null;
+        }
+
+        _accessToken = newAccess;
+        _apiClient.setAuthToken(newAccess);
+
+        await _secureStorage.write(key: _keyAccessToken, value: newAccess);
+
+        if (newRefresh != null) {
+          _refreshToken = newRefresh;
+          await _secureStorage.write(
+            key: _keyRefreshToken,
+            value: newRefresh,
+          );
+        }
+
+        debugPrint('✓ Access token rafraîchi');
+        notifyListeners();
+        return newAccess;
+      }
+
+      debugPrint('⚠ Refresh échoué → logout');
+      await logout();
+      return null;
+    } catch (e) {
+      debugPrint('Erreur refresh token');
+      return null;
+    } finally {
+      _refreshing = false;
     }
   }
 
@@ -176,7 +307,11 @@ class AuthService extends ChangeNotifier {
 
     _apiClient.setAuthToken(_accessToken!);
 
-    // ⚡ Définir le shop courant
+    // ⚡ Re-brancher onUnauthorized
+    _apiClient.onUnauthorized = () async {
+      return await refreshAccessToken();
+    };
+
     final shopId = _user?['shop']?['id'] as String?;
     CurrentShop.set(shopId);
     debugPrint('🔍 _saveSession → CurrentShop.shopId = $shopId');
@@ -189,11 +324,14 @@ class AuthService extends ChangeNotifier {
       debugPrint('Erreur écriture token sécurisé');
     }
 
-    // Écrire le user dans SharedPreferences
+    // ⚡ Écrire le user dans le stockage sécurisé (PAS SharedPreferences)
     if (_user != null) {
       try {
-        final prefs = await SharedPreferences.getInstance();
-        await prefs.setString(_keyUser, jsonEncode(_user));
+        await _secureStorage.write(
+          key: _keyUser,
+          value: jsonEncode(_user),
+        );
+        debugPrint('🔍 _saveSession → user écrit dans secure storage');
       } catch (e) {
         debugPrint('Erreur écriture user');
       }
@@ -208,23 +346,17 @@ class AuthService extends ChangeNotifier {
     _user = null;
     _isAuthenticated = false;
     _apiClient.clearAuthToken();
+    _apiClient.onUnauthorized = null;
 
-    // ⚡ Effacer le shop courant
     CurrentShop.clear();
     debugPrint('🔍 logout → CurrentShop effacé');
 
     try {
       await _secureStorage.delete(key: _keyAccessToken);
       await _secureStorage.delete(key: _keyRefreshToken);
+      await _secureStorage.delete(key: _keyUser);
     } catch (e) {
       debugPrint('Erreur suppression token sécurisé');
-    }
-
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.remove(_keyUser);
-    } catch (e) {
-      debugPrint('Erreur suppression user');
     }
 
     notifyListeners();
@@ -236,37 +368,33 @@ class AuthService extends ChangeNotifier {
   }
 
   // ═══════════════════════════════════════════════════════════
-  // VÉRIFICATION D'APPAREIL
+  // VÉRIFICATION D'APPAREIL (legacy)
   // ═══════════════════════════════════════════════════════════
 
   Future<bool> isDeviceVerified(String phone) async {
-    final prefs = await SharedPreferences.getInstance();
-    final verified = prefs.getBool(_keyDeviceVerified) ?? false;
-    final savedPhone = prefs.getString(_keyVerifiedPhone);
-    return verified && savedPhone == phone;
+    final verified = await _secureStorage.read(key: _keyDeviceVerified);
+    final savedPhone = await _secureStorage.read(key: _keyVerifiedPhone);
+    return verified == 'true' && savedPhone == phone;
   }
 
   Future<void> markDeviceAsVerified(String phone) async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setBool(_keyDeviceVerified, true);
-    await prefs.setString(_keyVerifiedPhone, phone);
+    await _secureStorage.write(key: _keyDeviceVerified, value: 'true');
+    await _secureStorage.write(key: _keyVerifiedPhone, value: phone);
   }
 
   Future<void> resetDeviceVerification() async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.remove(_keyDeviceVerified);
-    await prefs.remove(_keyVerifiedPhone);
+    await _secureStorage.delete(key: _keyDeviceVerified);
+    await _secureStorage.delete(key: _keyVerifiedPhone);
   }
 
   Future<String?> getVerifiedPhone() async {
-    final prefs = await SharedPreferences.getInstance();
-    return prefs.getString(_keyVerifiedPhone);
+    return await _secureStorage.read(key: _keyVerifiedPhone);
   }
 
   Future<bool> hasVerifiedPhone() async {
-    final prefs = await SharedPreferences.getInstance();
-    return prefs.getString(_keyVerifiedPhone) != null &&
-        (prefs.getBool(_keyDeviceVerified) ?? false);
+    final verified = await _secureStorage.read(key: _keyDeviceVerified);
+    final phone = await _secureStorage.read(key: _keyVerifiedPhone);
+    return verified == 'true' && phone != null;
   }
 
   // ═══════════════════════════════════════════════════════════
@@ -289,24 +417,27 @@ class AuthService extends ChangeNotifier {
         if (data['user'] != null) {
           _user = data['user'] as Map<String, dynamic>;
 
-          // ⚡ Mettre à jour le shop courant
           final shopId = _user?['shop']?['id'] as String?;
           CurrentShop.set(shopId);
 
-          final prefs = await SharedPreferences.getInstance();
-          await prefs.setString(_keyUser, jsonEncode(_user));
+          try {
+            await _secureStorage.write(
+              key: _keyUser,
+              value: jsonEncode(_user),
+            );
+          } catch (e) {
+            debugPrint('Erreur écriture user après changePassword');
+          }
         }
 
         notifyListeners();
         return {'success': true};
       }
 
-      String errorMessage = 'Erreur lors du changement';
-      if (response.body is Map && response.body['error'] != null) {
-        errorMessage = response.body['error'] as String;
-      }
-
-      return {'success': false, 'error': errorMessage};
+      return {
+        'success': false,
+        'error': response.errorMessage ?? 'Erreur lors du changement',
+      };
     } catch (e) {
       debugPrint('Erreur changePassword');
       return {'success': false, 'error': 'Erreur de connexion'};

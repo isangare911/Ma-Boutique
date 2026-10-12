@@ -1,13 +1,14 @@
 class Subscription {
   final String shopId;
   final String plan; // TRIAL, ESSENTIEL, PRO, BUSINESS
-  final String status; // TRIAL, ACTIVE, GRACE_PERIOD, EXPIRED
+  final String
+      status; // PENDING_VALIDATION, TRIAL, ACTIVE, GRACE_PERIOD, EXPIRED, CANCELLED
   final DateTime start;
   final DateTime? end;
   final int daysRemaining;
   final bool isActive;
   final DateTime? lastPaymentDate;
-  final DateTime lastVerifiedAt; // ⚡ Anti-manipulation de date
+  final DateTime lastVerifiedAt;
 
   Subscription({
     required this.shopId,
@@ -29,12 +30,18 @@ class Subscription {
   bool get isActiveStatus => status == 'ACTIVE';
   bool get isGracePeriod => status == 'GRACE_PERIOD';
   bool get isExpired => status == 'EXPIRED';
+  bool get isPendingValidation => status == 'PENDING_VALIDATION';
+  bool get isCancelled => status == 'CANCELLED';
 
   /// Peut-on vendre ? (essai ou actif seulement)
   bool get canSell => isActive || isTrial;
 
   /// Peut-on consulter les données ?
-  bool get canView => true; // Toujours vrai
+  bool get canView => true;
+
+  // ═══════════════════════════════════════════════════════════
+  // LIBELLÉS LISIBLES
+  // ═══════════════════════════════════════════════════════════
 
   /// Nom lisible du plan
   String get planName {
@@ -48,13 +55,15 @@ class Subscription {
       case 'BUSINESS':
         return 'Business';
       default:
-        return plan;
+        return plan.isEmpty ? 'Aucun' : plan;
     }
   }
 
   /// Nom lisible du statut
   String get statusName {
     switch (status) {
+      case 'PENDING_VALIDATION':
+        return 'En attente de validation';
       case 'TRIAL':
         return 'Période d\'essai';
       case 'ACTIVE':
@@ -63,10 +72,15 @@ class Subscription {
         return 'Période de grâce';
       case 'EXPIRED':
         return 'Expiré';
+      case 'CANCELLED':
+        return 'Annulé';
       default:
         return status;
     }
   }
+
+  /// Alias de statusName (utilisé dans certains écrans admin)
+  String get displayStatus => statusName;
 
   // ═══════════════════════════════════════════════════════════
   // SERIALIZATION
@@ -75,8 +89,8 @@ class Subscription {
   factory Subscription.fromJson(Map<String, dynamic> json) {
     return Subscription(
       shopId: json['id'] as String,
-      plan: json['subscription_plan'] as String? ?? 'TRIAL',
-      status: json['subscription_status'] as String? ?? 'TRIAL',
+      plan: json['subscription_plan'] as String? ?? '',
+      status: json['subscription_status'] as String? ?? 'PENDING_VALIDATION',
       start: DateTime.parse(json['subscription_start'] as String),
       end: json['subscription_end'] != null
           ? DateTime.parse(json['subscription_end'] as String)

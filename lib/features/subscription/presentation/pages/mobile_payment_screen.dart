@@ -3,10 +3,12 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../../../../core/services/auth_service.dart';
 import '../../../../core/services/subscription_service.dart';
 import '../../../../core/theme/app_theme.dart';
 import '../../../../core/utils/formatters.dart';
 import '../../../../data/models/payment.dart';
+import '../../../auth/presentation/pages/login_screen.dart';
 
 class MobilePaymentScreen extends StatefulWidget {
   final String plan;
@@ -33,7 +35,6 @@ class _MobilePaymentScreenState extends State<MobilePaymentScreen> {
   bool _isConfirming = false;
   String? _errorMessage;
 
-  // ⚡ Polling pour vérifier la validation
   Timer? _pollingTimer;
   int _pollingCount = 0;
 
@@ -69,6 +70,29 @@ class _MobilePaymentScreenState extends State<MobilePaymentScreen> {
       'description': 'Composez #155#',
     },
   ];
+
+  // ═══════════════════════════════════════════════════════════
+  // VALIDATION MINIMALE DU CODE DE TRANSACTION
+  // ═══════════════════════════════════════════════════════════
+  /// ⚡ On accepte TOUT code non vide (4-200 caractères).
+  /// L'admin valide manuellement en vérifiant ses SMS Orange Money.
+  String? _validateTransactionId(String transactionId) {
+    final trimmed = transactionId.trim();
+
+    if (trimmed.isEmpty) {
+      return 'Veuillez entrer le code de transaction';
+    }
+
+    if (trimmed.length < 4) {
+      return 'Code trop court (minimum 4 caractères)';
+    }
+
+    if (trimmed.length > 200) {
+      return 'Code trop long (maximum 200 caractères)';
+    }
+
+    return null;
+  }
 
   // ═══════════════════════════════════════════════════════════
   // CRÉER LE PAIEMENT
@@ -109,16 +133,11 @@ class _MobilePaymentScreenState extends State<MobilePaymentScreen> {
   Future<void> _submitProof() async {
     final transactionId = _transactionController.text.trim();
 
-    if (transactionId.isEmpty) {
-      setState(() {
-        _errorMessage = 'Veuillez entrer le code de transaction';
-      });
-      return;
-    }
+    final validationError = _validateTransactionId(transactionId);
 
-    if (transactionId.length < 4) {
+    if (validationError != null) {
       setState(() {
-        _errorMessage = 'Le code doit contenir au moins 4 caractères';
+        _errorMessage = validationError;
       });
       return;
     }
@@ -128,17 +147,17 @@ class _MobilePaymentScreenState extends State<MobilePaymentScreen> {
       _errorMessage = null;
     });
 
-    final success = await SubscriptionService.instance.submitPaymentProof(
+    final result = await SubscriptionService.instance.submitPaymentProof(
       paymentId: _payment!.id,
-      transactionId: transactionId,
+      transactionId: transactionId.toUpperCase(),
     );
 
     if (!mounted) return;
 
-    if (!success) {
+    if (result['success'] != true) {
       setState(() {
         _isConfirming = false;
-        _errorMessage =
+        _errorMessage = result['error'] as String? ??
             'Erreur lors de la soumission. Vérifiez le code de transaction.';
       });
       return;
@@ -150,12 +169,11 @@ class _MobilePaymentScreenState extends State<MobilePaymentScreen> {
       _currentStep = 2;
     });
 
-    // ⚡ Démarrer le polling (vérifie toutes les 10s)
     _startPolling();
   }
 
   // ═══════════════════════════════════════════════════════════
-  // POLLING : vérifie si le paiement est approuvé
+  // POLLING
   // ═══════════════════════════════════════════════════════════
   void _startPolling() {
     _pollingCount = 0;
@@ -164,7 +182,6 @@ class _MobilePaymentScreenState extends State<MobilePaymentScreen> {
     _pollingTimer = Timer.periodic(const Duration(seconds: 10), (timer) async {
       _pollingCount++;
 
-      // Arrêter après 30 tentatives (5 minutes)
       if (_pollingCount > 30) {
         timer.cancel();
         return;
@@ -175,7 +192,6 @@ class _MobilePaymentScreenState extends State<MobilePaymentScreen> {
         return;
       }
 
-      // ⚡ Recharger le statut de l'abonnement
       await SubscriptionService.instance.refreshSubscription();
 
       if (!mounted) {
@@ -183,7 +199,6 @@ class _MobilePaymentScreenState extends State<MobilePaymentScreen> {
         return;
       }
 
-      // Vérifier si l'abonnement est activé
       final sub = SubscriptionService.instance.subscription;
       if (sub != null && sub.isActiveStatus) {
         timer.cancel();
@@ -195,7 +210,7 @@ class _MobilePaymentScreenState extends State<MobilePaymentScreen> {
   }
 
   // ═══════════════════════════════════════════════════════════
-  // COPIER LE CODE UNIQUE
+  // COPIER
   // ═══════════════════════════════════════════════════════════
   Future<void> _copyCode() async {
     if (_instructions == null) return;
@@ -236,16 +251,22 @@ class _MobilePaymentScreenState extends State<MobilePaymentScreen> {
         leading: IconButton(
           icon: const Icon(Icons.arrow_back),
           onPressed: () {
-            if (_currentStep == 2) {
-              // En attente : empêcher le retour
-              _showCancelDialog();
-            } else if (_currentStep == 1) {
+            if (_currentStep == 2 || _currentStep == 1) {
               _showCancelDialog();
             } else {
               Navigator.pop(context);
             }
           },
         ),
+        // ⚡ Icône de déconnexion à l'étape "attente"
+        actions: [
+          if (_currentStep == 2)
+            IconButton(
+              icon: const Icon(Icons.logout),
+              tooltip: 'Se déconnecter',
+              onPressed: _confirmLogout,
+            ),
+        ],
       ),
       body: _buildBody(),
     );
@@ -273,7 +294,6 @@ class _MobilePaymentScreenState extends State<MobilePaymentScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Récapitulatif du plan
           Container(
             width: double.infinity,
             padding: const EdgeInsets.all(20),
@@ -304,7 +324,6 @@ class _MobilePaymentScreenState extends State<MobilePaymentScreen> {
             ),
           ),
           const SizedBox(height: 24),
-
           Text(
             'Choisissez votre mode de paiement',
             style: TextStyle(
@@ -314,16 +333,12 @@ class _MobilePaymentScreenState extends State<MobilePaymentScreen> {
             ),
           ),
           const SizedBox(height: 16),
-
           ..._methods.map((method) => _buildMethodCard(method)),
-
           if (_errorMessage != null) ...[
             const SizedBox(height: 16),
             _buildErrorBox(_errorMessage!),
           ],
-
           const SizedBox(height: 24),
-
           Container(
             padding: const EdgeInsets.all(16),
             decoration: BoxDecoration(
@@ -451,7 +466,6 @@ class _MobilePaymentScreenState extends State<MobilePaymentScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // ⚡ CODE UNIQUE EN GRAND
           Container(
             width: double.infinity,
             padding: const EdgeInsets.all(24),
@@ -513,8 +527,6 @@ class _MobilePaymentScreenState extends State<MobilePaymentScreen> {
             ),
           ),
           const SizedBox(height: 16),
-
-          // ⚡ AVERTISSEMENT CRITIQUE
           Container(
             padding: const EdgeInsets.all(16),
             decoration: BoxDecoration(
@@ -558,8 +570,6 @@ class _MobilePaymentScreenState extends State<MobilePaymentScreen> {
             ),
           ),
           const SizedBox(height: 24),
-
-          // Montant à envoyer
           Text(
             'Montant à envoyer',
             style: TextStyle(
@@ -586,8 +596,6 @@ class _MobilePaymentScreenState extends State<MobilePaymentScreen> {
             ),
           ),
           const SizedBox(height: 20),
-
-          // Numéro marchand
           Text(
             'Numéro marchand',
             style: TextStyle(
@@ -625,8 +633,6 @@ class _MobilePaymentScreenState extends State<MobilePaymentScreen> {
             ),
           ),
           const SizedBox(height: 24),
-
-          // Étapes
           Text(
             'Étapes à suivre',
             style: TextStyle(
@@ -652,8 +658,6 @@ class _MobilePaymentScreenState extends State<MobilePaymentScreen> {
             ),
           ),
           const SizedBox(height: 24),
-
-          // Code de transaction
           Text(
             'Code de transaction reçu par SMS',
             style: TextStyle(
@@ -665,8 +669,9 @@ class _MobilePaymentScreenState extends State<MobilePaymentScreen> {
           const SizedBox(height: 8),
           TextField(
             controller: _transactionController,
+            textCapitalization: TextCapitalization.characters,
             decoration: InputDecoration(
-              hintText: 'Ex: MP240924.1234.A5B8C2',
+              hintText: 'Collez le code reçu par SMS',
               prefixIcon: const Icon(Icons.receipt_long),
               filled: true,
               fillColor: AppColors.card(context),
@@ -677,14 +682,11 @@ class _MobilePaymentScreenState extends State<MobilePaymentScreen> {
             ),
             style: TextStyle(color: AppColors.text(context)),
           ),
-
           if (_errorMessage != null) ...[
             const SizedBox(height: 16),
             _buildErrorBox(_errorMessage!),
           ],
           const SizedBox(height: 24),
-
-          // Bouton confirmer
           ElevatedButton.icon(
             onPressed: _isConfirming ? null : _submitProof,
             icon: _isConfirming
@@ -707,7 +709,6 @@ class _MobilePaymentScreenState extends State<MobilePaymentScreen> {
             ),
           ),
           const SizedBox(height: 12),
-
           OutlinedButton.icon(
             onPressed: _isConfirming ? null : _showCancelDialog,
             icon: const Icon(Icons.close),
@@ -767,7 +768,7 @@ class _MobilePaymentScreenState extends State<MobilePaymentScreen> {
   }
 
   // ═══════════════════════════════════════════════════════════
-  // ÉTAPE 2 : EN ATTENTE DE VALIDATION
+  // ÉTAPE 2 : EN ATTENTE
   // ═══════════════════════════════════════════════════════════
   Widget _buildWaitingValidation() {
     return Center(
@@ -834,12 +835,14 @@ class _MobilePaymentScreenState extends State<MobilePaymentScreen> {
             ),
             const SizedBox(height: 24),
             Text(
-              'Vous serez notifié automatiquement dès validation.',
+              'Vous pouvez fermer l\'app en toute sécurité.\n'
+              'La validation se fera automatiquement.',
               textAlign: TextAlign.center,
               style: TextStyle(
                 fontSize: 12,
                 color: AppColors.textSec(context),
                 fontStyle: FontStyle.italic,
+                height: 1.5,
               ),
             ),
             const SizedBox(height: 32),
@@ -960,5 +963,56 @@ class _MobilePaymentScreenState extends State<MobilePaymentScreen> {
       await SubscriptionService.instance.cancelPayment(_payment!.id);
       if (mounted) Navigator.pop(context);
     }
+  }
+
+  // ═══════════════════════════════════════════════════════════
+  // DÉCONNEXION (à l'étape attente)
+  // ═══════════════════════════════════════════════════════════
+  /// ⚡ Confirme puis déconnecte l'utilisateur (sans annuler le paiement).
+  /// Le paiement reste en PENDING_REVIEW côté serveur, l'admin le validera.
+  Future<void> _confirmLogout() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Se déconnecter ?'),
+        content: const Text(
+          'Votre paiement est en cours de validation. '
+          'Vous pouvez vous déconnecter en toute sécurité, '
+          'il sera validé prochainement.\n\n'
+          'Voulez-vous vraiment vous déconnecter ?',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Annuler'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppColors.dangerTheme(context),
+            ),
+            child: const Text('Se déconnecter'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true) return;
+    if (!mounted) return;
+
+    // ⚡ Arrêter le polling
+    _pollingTimer?.cancel();
+
+    // ⚡ Logout
+    await AuthService.instance.logout();
+    await SubscriptionService.instance.clearCache();
+
+    if (!mounted) return;
+
+    // ⚡ Retour au login
+    Navigator.of(context).pushAndRemoveUntil(
+      MaterialPageRoute(builder: (_) => const LoginScreen()),
+      (route) => false,
+    );
   }
 }

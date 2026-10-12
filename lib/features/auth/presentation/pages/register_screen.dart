@@ -22,6 +22,9 @@ class _RegisterScreenState extends State<RegisterScreen> {
   bool _obscurePassword = true;
   bool _isLoading = false;
 
+  // ⚡ Aligné avec le backend (min 8 caractères)
+  static const int _minPasswordLength = 8;
+
   @override
   void dispose() {
     _nameController.dispose();
@@ -31,13 +34,34 @@ class _RegisterScreenState extends State<RegisterScreen> {
     super.dispose();
   }
 
+  /// ⚡ Validation mot de passe alignée avec Django
+  String? _validatePassword(String? value) {
+    if (value == null || value.isEmpty) {
+      return 'Veuillez entrer un mot de passe';
+    }
+    if (value.length < _minPasswordLength) {
+      return 'Minimum $_minPasswordLength caractères';
+    }
+    if (!RegExp(r'[A-Z]').hasMatch(value)) {
+      return 'Doit contenir au moins une majuscule';
+    }
+    if (!RegExp(r'[a-z]').hasMatch(value)) {
+      return 'Doit contenir au moins une minuscule';
+    }
+    if (!RegExp(r'[0-9]').hasMatch(value)) {
+      return 'Doit contenir au moins un chiffre';
+    }
+    return null;
+  }
+
   Future<void> _register() async {
     if (!_formKey.currentState!.validate()) return;
 
     setState(() => _isLoading = true);
 
     try {
-      final success = await AuthService.instance.register(
+      // ⚡ register() retourne un RegisterResult maintenant
+      final result = await AuthService.instance.register(
         phone: _phoneController.text.trim(),
         password: _passwordController.text,
         shopName: _shopNameController.text.trim(),
@@ -47,8 +71,13 @@ class _RegisterScreenState extends State<RegisterScreen> {
 
       if (!mounted) return;
 
-      if (success) {
-        await SubscriptionService.instance.refreshSubscription();
+      if (result.success) {
+        // ⚡ Reload non-bloquant
+        try {
+          await SubscriptionService.instance.refreshSubscription();
+        } catch (e) {
+          debugPrint('Erreur refresh subscription après register: $e');
+        }
 
         if (!mounted) return;
 
@@ -60,11 +89,18 @@ class _RegisterScreenState extends State<RegisterScreen> {
           (route) => false,
         );
       } else {
+        String message;
+        if (result.isThrottled) {
+          message = 'Trop de tentatives. Réessayez plus tard.';
+        } else if (result.isNetworkError) {
+          message = 'Pas de connexion. Vérifiez votre réseau.';
+        } else {
+          message = result.error ?? 'Erreur lors de l\'inscription.';
+        }
+
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: const Text(
-              'Erreur lors de l\'inscription. Vérifiez le numéro de téléphone.',
-            ),
+            content: Text(message),
             backgroundColor: AppColors.dangerTheme(context),
           ),
         );
@@ -73,7 +109,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Erreur: $e'),
+            content: const Text('Erreur inattendue. Réessayez.'),
             backgroundColor: AppColors.dangerTheme(context),
           ),
         );
@@ -195,15 +231,15 @@ class _RegisterScreenState extends State<RegisterScreen> {
                       });
                     },
                   ),
-                  validator: (value) {
-                    if (value == null || value.isEmpty) {
-                      return 'Veuillez entrer un mot de passe';
-                    }
-                    if (value.length < 6) {
-                      return 'Le mot de passe doit contenir au moins 6 caractères';
-                    }
-                    return null;
-                  },
+                  validator: _validatePassword,
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  'Minimum $_minPasswordLength caractères, avec majuscule, minuscule et chiffre.',
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: AppColors.textSec(context),
+                  ),
                 ),
                 const SizedBox(height: 32),
 

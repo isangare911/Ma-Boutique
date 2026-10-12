@@ -5,25 +5,28 @@ import 'database_helper.dart';
 class SyncDao {
   final DatabaseHelper _dbHelper = DatabaseHelper.instance;
 
-  /// Récupère toutes les opérations en attente
+  /// ⚡ Nombre max de retries avant de considérer une opération comme "dead"
+  static const int maxRetries = 10;
+
+  /// Récupère toutes les opérations en attente (hors "dead")
   Future<List<Map<String, dynamic>>> getPendingOperations(
       {int limit = 50}) async {
     final db = await _dbHelper.database;
-    final result = await db.query(
+    return await db.query(
       'sync_queue',
-      where: 'status = ?',
-      whereArgs: ['PENDING'],
+      where: 'status = ? AND retry_count < ?',
+      whereArgs: ['PENDING', maxRetries],
       orderBy: 'created_at ASC',
       limit: limit,
     );
-    return result;
   }
 
-  /// Compte les opérations en attente
+  /// Compte les opérations en attente (hors "dead")
   Future<int> getPendingCount() async {
     final db = await _dbHelper.database;
     final result = await db.rawQuery(
-      "SELECT COUNT(*) FROM sync_queue WHERE status = 'PENDING'",
+      "SELECT COUNT(*) FROM sync_queue WHERE status = 'PENDING' AND retry_count < ?",
+      [maxRetries],
     );
     return Sqflite.firstIntValue(result) ?? 0;
   }
@@ -74,7 +77,7 @@ class SyncDao {
     final db = await _dbHelper.database;
     await db.update(
       'sync_queue',
-      {'status': 'PENDING'},
+      {'status': 'PENDING', 'retry_count': 0},
       where: 'id = ?',
       whereArgs: [id],
     );
@@ -91,12 +94,12 @@ class SyncDao {
     );
   }
 
-  /// Remet toutes les opérations échouées en attente
+  /// Remet toutes les opérations échouées en attente (retry_count remis à 0)
   Future<int> resetAllFailed() async {
     final db = await _dbHelper.database;
     return await db.update(
       'sync_queue',
-      {'status': 'PENDING'},
+      {'status': 'PENDING', 'retry_count': 0},
       where: 'status = ?',
       whereArgs: ['FAILED'],
     );
@@ -105,7 +108,6 @@ class SyncDao {
   /// Nettoie les opérations synchronisées (pour ne pas surcharger la DB)
   Future<int> cleanSyncedOperations({int keepLast = 100}) async {
     final db = await _dbHelper.database;
-    // Récupérer les IDs des 100 dernières opérations synchronisées à garder
     final result = await db.query(
       'sync_queue',
       columns: ['id'],
